@@ -1,16 +1,3 @@
-#!perl
-use File::Basename qw(basename dirname);
-use Cwd;
-
-$origdir = cwd;
-chdir dirname($0);
-$file = basename($0, '.PL');
-
-open OUT, ">$file" or die "Can't create $file: $!\n";
-
-print "Extracting $file...\n";
-
-print OUT <<"!SAMPLE!CONFIG!FILE!";
 ## This is a sample savelogs.conf which should be suitable for most
 ## uses on the VPS
 ##
@@ -121,8 +108,3 @@ Full-Path               no
 #Log                     /var/log/messages
 #Log                     /var/log/proftpd
 #Log                     /var/log/ace
-!SAMPLE!CONFIG!FILE!
-
-close OUT or die "Can't close $file: $!\n";
-chmod 0644, $file or die "Can't set file permissions for $file: $!\n";
-chdir $origdir;

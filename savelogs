@@ -15,7 +15,7 @@ use vars qw($VERSION $BUILD);
 
 my $prognam = $0;
 $prognam    =~ s!^.*/([^/]+)$!$1!;
-$VERSION    = '1.62';
+$VERSION    = '1.63';
 $BUILD      = sprintf("%d/%02d/%02d", q$Date: 2002/06/27 18:21:53 $ =~ 
 		      m!(\d{1,4})/(\d{1,2})/(\d{1,2})!);
 

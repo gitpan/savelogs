@@ -4,7 +4,8 @@ MANIFEST
 Makefile.PL
 README
 Upgrading
-conf/savelogs.conf.sample.PL
+conf/savelogs.conf.lint
+conf/savelogs.conf.sample
 pods/rotation.pod
 savelogs
 t/0_defaults.t

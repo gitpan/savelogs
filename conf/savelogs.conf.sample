@@ -1,0 +1,9 @@
+## 
+## Absolute paths are used in the PostMoveHook and Filter commands.
+##
+## Please read the man page savelogs(1).
+##
+
+LogFile                 /var/log/savelogs
+PostMoveHook            /usr/local/bin/restart_apache
+ApacheConf              /usr/local/apache/httpd.conf
