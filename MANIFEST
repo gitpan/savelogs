@@ -33,5 +33,4 @@ t/lfa
 t/logs/access_log
 t/logs/error_log
 t/logs/messages
-t/makelog
 t/savelogs.pl

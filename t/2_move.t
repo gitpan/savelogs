@@ -79,7 +79,7 @@ $size1 = -s _;
 ok( $size1 < 1024 );
 
 ## make a larger log
-system( "./makelog -r 10240 $log1" );
+make_log(10240, $log1, 1);
 system( "$savelogs --home=. --period $log1" );
 ok( -f "$log1.0.gz" || -f "$log1.0.Z" );
 $size2 = ( -f "$log1.0.gz" ? -s "$log1.0.gz" : -s "$log1.0.Z" );
@@ -90,7 +90,7 @@ ok( -f "$log1.1.gz" || -f "$log1.1.Z" );
 ok( -s _ == $size1 );
 
 ## make one more log
-system( "./makelog -r 8192 $log1" );
+make_log(8192, $log1, 1);
 system( "$savelogs --home=. --period $log1" );
 ok( -f "$log1.0.gz" || -f "$log1.0.Z" );
 ok( (-s "$log1.0.gz" < 20540 && -s _ > 800) || (-s "$log1.0.Z" < 20540 && -s _ > 800) );

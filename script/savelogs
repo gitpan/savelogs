@@ -15,7 +15,7 @@ use vars qw($VERSION $BUILD);
 
 my $prognam = $0;
 $prognam    =~ s!^.*/([^/]+)$!$1!;
-$VERSION    = '1.65';
+$VERSION    = '1.66';
 $BUILD      = sprintf("%d/%02d/%02d", q$Date: 2003/03/13 18:21:53 $ =~ 
 		      m!(\d{1,4})/(\d{1,2})/(\d{1,2})!);
 
@@ -3513,6 +3513,19 @@ without big headaches). Using a config file sometimes helps.
 
 You can't have multiline commands in the configuration file. This is
 on the "to do" list.
+
+=back
+
+=head1 ACKNOWLEDGEMENTS
+
+=over 4
+
+=item *
+
+Thanks to Jeroen Latour (cpantester@calaquendi.net) for working with
+me on getting all the tests to run cleanly on his Cobalt box. It
+should now test cleanly on many other platforms because of his
+patience.
 
 =back
 

@@ -17,11 +17,19 @@ sub settings {
 sub make_log {
     my $size = shift || 1;
     my $file = shift || 'test_log';
+    my $is_random = shift;
 
     open FILE, ">$file"
       or die "Could not open $file: $!\n";
 
-    print FILE 'x' x $size;
+    if( $is_random ) {
+	for( 1 .. $size ) {
+	    print FILE chr(rand(255));
+	}
+    }
+    else {
+	print FILE 'x' x $size;
+    }
     close FILE;
 
     return $file;
