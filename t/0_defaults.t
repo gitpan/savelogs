@@ -1,5 +1,5 @@
 use Test;
-BEGIN { $| = 1; plan(tests => 39); chdir 't' if -d 't'; }
+BEGIN { $| = 1; plan(tests => 42); chdir 't' if -d 't'; }
 require 'savelogs.pl';
 
 use vars qw(
@@ -26,7 +26,10 @@ $settings = settings(`$savelogs --settings 2>&1`);
 ok( $settings->{'apacheconf'}, 	     'undef' );
 ok( $settings->{'apachelog'},  	     '(?i-xsm:^\s*(?:TransferLog|ErrorLog|AgentLog|RefererLog|CustomLog)\s+(\S+))' );
 ok( $settings->{'apachelogexclude'}, '(?-xism:^/dev/null$|\|)' );
+ok( $settings->{'apachehost'},       '(  )' );
 ok( $settings->{'archive'},          'undef' );
+ok( $settings->{'chmod'},            'undef' );
+ok( $settings->{'chown'},            'undef' );
 ok( $settings->{'clobber'},   	     '1' );
 $bin = `which compress 2>/dev/null | grep -v 'no compress'`; chomp $bin; unless( $bin =~ /compress/ ) { $bin = '' }
 ok( $settings->{'compress'},  	     $bin );

@@ -3,7 +3,7 @@ use strict;
 
 ## Scott Wiersdorf
 ## Created: Fri May 18 12:41:29 MDT 2001
-## $Id: savelogs,v 1.28 2002/06/27 18:21:53 scottw Exp $
+## $SMEId: local/savelogs/script/savelogs,v 1.12 2004/08/30 18:02:43 scottw Exp $
 
 ## savelogs
 
@@ -15,8 +15,8 @@ use vars qw($VERSION $BUILD);
 
 my $prognam = $0;
 $prognam    =~ s!^.*/([^/]+)$!$1!;
-$VERSION    = '1.70';
-$BUILD      = sprintf("%d/%02d/%02d", q$Date: 2003/03/13 18:21:53 $ =~ 
+$VERSION    = '1.81';
+$BUILD      = sprintf("%d/%02d/%02d", q$SMEId: local/savelogs/script/savelogs,v 1.12 2004/08/30 18:02:43 scottw Exp $ =~ 
 		      m!(\d{1,4})/(\d{1,2})/(\d{1,2})!);
 
 ## logging levels; debugging levels are for displaying data values
@@ -52,6 +52,7 @@ my %config = (
 	      'apachelog'        => 'TransferLog|ErrorLog|AgentLog|RefererLog|CustomLog',
 	      'apachelogexclude' => [ qw(^/dev/null$ \|) ],
 	      'apacheinclude'    => undef,
+	      'apachehost'       => [],
 
 	      'log'              => [],
 	      'nolog'            => [],
@@ -66,6 +67,8 @@ my %config = (
 	      'hourly'        	 => undef,
 	      'postmovehook'     => undef,
 	      'force-pmh'        => undef,
+	      'chown'            => undef,
+	      'chmod'            => undef,
 
 	      ## stemming logs
 	      'stem'             => 'today',
@@ -114,6 +117,8 @@ unless( GetOptions(\%opt,
 		   'apachelogexclude:s',
 		   \@{$opt{'apachelogexclude'}},
 		   'apacheinclude',
+		   'apachehost:s',
+		   \@{$opt{'apachehost'}},
 
 		   'log:s',
 		   \@{$opt{'log'}},
@@ -128,6 +133,8 @@ unless( GetOptions(\%opt,
 		   'ext:s',
 		   'datefmt=s',
 		   'hourly!',
+		   'chown=s',
+		   'chmod=s',
 
 		   'postmovehook=s',
 		   'force-pmh',
@@ -430,7 +437,7 @@ FETCH_LOGS:
     my %log_inodes = ();  ## uniqify log file list
 
     ## fetch logs from apacheconf directive
-    @loggies = fetch_apache_logs( $config{'apacheconf'} );
+    @loggies = fetch_apache_logs( $config{'apacheconf'}, @{$config{'apachehost'}} );
 
     ## fetch log directives (internal regex expansion)
     push @loggies, regex_expand(@{$config{'log'}});
@@ -508,7 +515,8 @@ GRIPE:
 	if( $config{'gripe'} ) {
 	    my $err = <<_NEED_LOGS_;
 You must specify one or more log files to process via the 'ApacheConf'
-directive, the 'Log' directive, or on the command-line.
+directive, the 'ApacheHost' directive, or the 'Log' directive, or on
+the command-line.
 _NEED_LOGS_
 	    usage( $err );
 	}
@@ -657,6 +665,33 @@ POSTMOVEHOOK:
     write_log( LEVEL3, "Exiting post-move-hook phase" );
 }
 
+## -- chown/chmod fixups -- ##
+CHOWN:
+{
+    last CHOWN unless $config{'chown'};
+    write_log( LEVEL4, "Entering chown block" );
+    my($uid, $gid) = split(':', $config{'chown'});
+    $uid = ($uid !~ /^\d+$/
+	    ? ($uid eq '' ? -1 : (defined getpwnam($uid) ? getpwnam($uid) : -1) )
+	    : $uid );
+    $gid = ($gid !~ /^\d+$/
+	    ? ($gid eq '' ? -1 : (defined getgrnam($gid) ? getgrnam($gid) : -1) )
+	    : $gid );
+    write_log( LEVEL5, "Chowning logs to $uid:$gid");
+    my $cnt = chown $uid, $gid, map { mkpath($_->{'newlogpath'}, $_->{'newlog'}) } @logs;
+    debug( LEVEL1, "CHOWN: $cnt of " . scalar(@logs) . " successfully chowned" );
+    write_log( LEVEL3, "Exiting chown block" );
+}
+
+CHMOD:
+{
+    last CHMOD unless $config{'chmod'};
+    write_log( LEVEL4, "Entering chmod block" );
+    write_log( LEVEL5, "Chmoding files to $config{'chmod'}");
+    my $cnt = chmod oct($config{'chmod'}), map { mkpath($_->{'newlogpath'}, $_->{'newlog'}) } @logs;
+    debug( LEVEL1, "CHMOD: $cnt of " . scalar(@logs) . " successfully chmoded" );
+    write_log( LEVEL3, "Exiting chmod block" );
+}
 
 ## -- phase 2: filter logs -- ##
 FILTER:
@@ -1512,8 +1547,10 @@ APACHE_CONF: {
     my %conf = ();
     my $server_root;
 
+## FIXME: need to test this 
     sub fetch_apache_logs {
 	my $httpd_conf = shift;  ## should be relative to $config{home} and leading slash stripped
+	my %hosts      = map { $_ => 1 } @_;     ## hosts to look for
 	my @logs = ();
 
 	## make sure apachelog is set. This shouldn't be an issue because
@@ -1525,7 +1562,6 @@ APACHE_CONF: {
 	}
 
 	return unless $httpd_conf;
-
 
 	## find logging directives in Apache configuration file
 	## $config{'home'} must be prepended to $httpd_conf to create
@@ -1544,7 +1580,7 @@ APACHE_CONF: {
 		    my @dirs = map { $httpd_conf . '/' . $_ } grep { !/^\.\.?$/ } readdir DIR;
 		    closedir DIR;
 
-		    push @logs, fetch_apache_logs($_) for @dirs;
+		    push @logs, fetch_apache_logs($_, (keys %hosts ? keys %hosts : ())) for @dirs;
 		    last FIND_LOGS;
 		}
 
@@ -1552,7 +1588,7 @@ APACHE_CONF: {
 		my @glob_conf = grep { s!^$config{'home'}!! } glob $config{'home'} . $httpd_conf;
 		if( scalar @glob_conf > 1 ) {
 		    debug( LEVEL1, "Found " . scalar @glob_conf . " config files from glob '$httpd_conf'" );
-		    push @logs, fetch_apache_logs($_) for @glob_conf;
+		    push @logs, fetch_apache_logs($_, (keys %hosts ? keys %hosts : ())) for @glob_conf;
 		    last FIND_LOGS;
 		}
 	    }
@@ -1604,7 +1640,7 @@ APACHE_CONF: {
 		    ## get server root
 		    local $_;
 		    while( <$HTTPD> ) {
-			next unless /^ServerRoot\s+(.+)\s*$/i;
+			next unless /^ServerRoot\s+"?([^"]+)"?\s*$/i;
 			$server_root = $1;
 			clean_path($server_root);
 			$server_root .= '/' if $server_root && $server_root !~ m!/$!;
@@ -1625,10 +1661,12 @@ APACHE_CONF: {
 	    }
 
 	    ## now parse the rest of the config file for log directives
+	    my $host_state = 0;
+	    my @host_logs  = ();
 	    seek $HTTPD, 0, 0;
-	    while( <$HTTPD> ) {
+	  LINE: while( <$HTTPD> ) {
 		## skip comments
-		next if /^\#/;            ## escape needed for emacs happiness
+		next LINE if /^\#/;            ## escape needed for emacs happiness
 
 		## process include directives, if desired
 		if( $config{'apacheinclude'} && /^\s*Include\s+(.+?)\s*$/i ) {
@@ -1641,8 +1679,57 @@ APACHE_CONF: {
 		    }
 
 		    debug( LEVEL1, "Recursively searching '$include' now..." );
-		    push @logs, fetch_apache_logs($include);
-		    next;
+		    push @logs, fetch_apache_logs($include, (keys %hosts ? keys %hosts : ()));
+		    next LINE;
+		}
+
+		## if we have ApacheHost set, we skip all non-matching
+		## virtualhost logs. We don't do the server's logs either.
+		## This is a small state machine.
+	      APACHE_HOST: {
+		    last APACHE_HOST unless ref($config{'apachehost'}) && @{$config{'apachehost'}};
+
+		    if( /^\s*<VirtualHost/i ) {
+			$host_state = 1;
+			next LINE;
+		    }
+
+		    if( m!^\s*</VirtualHost>!i ) {
+			if( $host_state == 2 ) {  ## we found our hostname
+			    for my $log_entry ( @host_logs ) {
+				## skip excluded patterns
+				if( $config{'apachelogexclude'} ) {
+				    if( $log_entry =~ $config{'apachelogexclude'} ) {
+					write_log( LEVEL3, "Skipping '$log_entry': Exclude pattern match." );
+					next LINE;
+				    }
+				}
+
+				## found a log entry
+				push @logs, $log_entry;
+				debug( LEVEL1, "Found host '$log_entry' in '$httpd_conf'" );
+			    }
+			}
+			@host_logs = ();
+			$host_state = 0;
+			next LINE;
+		    }
+
+		    ## in a <VirtualHost> block
+		    if( $host_state ) {  ## 1 or 2...
+			if( /$config{'apachelog'}/ ) {
+			    push @host_logs, $1;
+			}
+
+			if( $host_state == 1 && /^\s*Server(?:Name|Alias)\s+(.*)/ ) {
+			    if( $hosts{$1} ) {
+				$host_state = 2;
+				next LINE;
+			    }
+			}
+		    }
+
+		    next LINE;
 		}
 
 		## skip non-log directives. We grab the first argument after
@@ -1652,14 +1739,14 @@ APACHE_CONF: {
 		## We grab all the non-whitespace characters immediately after
 		## the log directive.
 		##
-		next unless /$config{'apachelog'}/;
+		next LINE unless /$config{'apachelog'}/;
 		my $log_entry = $1;
 
 		## skip excluded patterns
 		if( $config{'apachelogexclude'} ) {
 		    if( $log_entry =~ $config{'apachelogexclude'} ) {
 			write_log( LEVEL3, "Skipping '$log_entry': Exclude pattern match." );
-			next;
+			next LINE;
 		    }
 		}
 
@@ -2013,189 +2100,50 @@ sub usage {
 usage: $prognam [--options] [log1 .. logn]
 
 General program options:
-    --help       	      	show this message and exit
-    --version    	      	show program version and exit
-    --settings   	      	show current settings and exit
-    --dry-run                   show what you would normally do, but
-                                don't actually do it
-    --home=/path/to/home        location of your home directory. You
-                                usually don't need to change this
-    --config=/path/to/config  	path to config file
+    --help
+    --version
+    --settings
+    --dry-run
+    --home=/path/to/home
+    --config=/path/to/config
 
 Savelogs behavior:
-    --process=move|,filter|,archive|,compress|,delete
-				specify which archiving phases to
-				execute. By default, all phases are
-				run, though if no filter is specified
-				(via the --filter option), the filter
-				phase is skipped. 'move' renames the
-				log file(s). 'filter' runs the log
-				file through a user-specified program
-				and saves the output. 'archive' adds
-				the log file to a tar file (via gtar
-				or tar). 'compress' compresses the
-				archive (or log file if the 'archive'
-				option was omitted) using gzip or
-				compress.  'delete' removes the log
-				files when archiving is complete.
+    --process=[move][filter][archive][compress][delete]
 
 Savelogs reporting:
-    --loglevel=n              	show information while running. n is an
-			      	integer between 0 and 5 inclusive with
-			      	0 being silent and 5 being verbose
+    --loglevel=n
     --logfile=[stdout|stderr|/path/to/log]
-                                if specified, output from savelogs will
-			      	be sent to this file. If specified
-			      	without a pathname, the default (stdout)
-				will be written to instead. You may
-				also specify 'stderr'.
-    --nogripe                   turns off griping when no logs are
-				specified on the command-line. You
-				may enable griping with the --gripe
-				option.
+    --nogripe
 
 How savelogs finds your log files:
-    --apacheconf=/path/to/conf  location of Apache's configuration
-                                file (httpd.conf)
-    --apachelog=pattern         what Apache logging directives to look
-				for when finding logs in Apache's
-				httpd.conf file. By default, savelogs
-				looks for TransferLog, ErrorLog,
-				AgentLog, RefererLog, and CustomLog
+    --log=/path/to/log [--log=...]
+    --apacheconf=/path/to/conf
+    --apachelog=pattern
     --apachelogexclude[=pattern]
-				a regular expression used to exclude
-				certain log files from being
-				processed. For example, the pattern
-				'/dev/null' will exclude any log files
-				in httpd.conf with the string
-				'/dev/null' in them. A more precise
-				match of '^/dev/null\$' is safer. Any
-				Perl regular expression will work.
+    --apacheinclude
+    --apachehost=example.tld [--apachehost=...]
 
-				By default, savelogs uses
-				'^/dev/null\$|\|' as an exclude pattern,
-				so if you have one or more logs
-				directed to /dev/null they won't be
-				processed. Similarly, any logs
-				containing a pipe will be skipped.
-
-				You may add additional patterns to
-				exclude from processing by specifying
-				the option multiple times. If you
-				specify apachelogexclude without any
-				patterns, all exclude patterns will
-				be removed and all log files will be
-				processed (if they match other
-				criteria).
-    --apacheinclude             if set, Apache 'Include' directives
-                                will be honored and followed.
-
-How savelogs renames your files:
-    --sep[=character]           the character to use to separate the
-				log file from the extension. By
-				default a dot (.) is used. Other
-				popular characters are underscore (_)
-				and hyphen (-). If no separator is
-				given, the default will override any
-				config file separator
-    --ext[=string]              the extension given to log files
-				before archiving. By default, this
-				string is set to today's date in
-				yymmdd format. If no extension is
-				given, the default yymmdd is used,
-				overriding any configuration file
-				options.
-    --hourly                    add a letter of the alphabet to the
-				extension string, a different letter
-				occuring each hour. Midnight (0:00)
-				is 'a', 1am is 'b' and so forth up to
-				23:00.
-    --postmovehook=command      an optional command to execute after
-				renaming log files. If logs are have
-				a persistent daemon connected to them
-				(such as Apache does with its log
-				files), you should restart your Apache
-				daemons here.
-    --force-pmh                 execute the postmovehook command even
-				if there are no logs to process. By
-				default savelogs will not execute the
-				postmovehook command if there are no
-				logs.
-    --postfilterhook=command    an optional command to execute after
-                                filtering log files.
-    --force-pfh                 execute the postfilterhook command
-				even if there are no logs to process.
-				Like 'force-pmh'.
-    --stem=extension            specify a temporary extension for use
-				in programs that need a consistent
-				filename to work from, such as most
-				log file analysis programs. If
-				specified, savelogs will make a
-				symbolic link in the form of
-				'log.<stem>' where stem is the
-				extension you specify. If no extension
-				is specified, the default is the
-				string 'today'.
-    --stemhook=command          an optional command to execute after
-				a log has been stemmed. Here is where
-				you would place the command to run
-				your log file analysis program or
-				other process that requires the
-				predictable name that the stem option
-				offers.
-    --stemlink=link type        specify the type of link you wish to
-				make during the stem phase. Options
-				are 'symlink' (default), 'hard', or
-				'copy'. 
-    --filter=command            an optional command used to filter
-				log files before they're archived.
-				Popular commands are "egrep -v
-				'/images/' \$LOG" which would exclude
-				lines with the string '/images/' in
-				it.
+How savelogs moves (renames) your files:
+    --sep[=character]
+    --ext[=string]
+    --hourly
+    --postmovehook=command
+    --force-pmh
+    --chown=user|uid:group|gid
+    --chmod=nnnn (octal)
+    --postfilterhook=command
+    --force-pfh
+    --stem=extension
+    --stemhook=command
+    --stemlink=link type
+    --filter=command
 
 How savelogs archives your files:
-    --tar=path/to/tar           where to find a suitable tar binary
-				for archiving files. By default,
-				savelogs searches your path for gtar
-				and tar.
-    --zip=path/to/zip           where to find a suitable compression
-				binary to compress archives or log
-				files. By default, savelogs searches
-				your path for 'gzip' and failing that,
-				'compress'.
-    --archive=archive_name.tar  name of the tar file to store log
-				files in. By default, savelogs uses
-				the name of the log file being
-				processed as the archive name, so that
-				subsequent executions of savelogs will
-				add log files of similar nature to a
-				single archive. For example,
-				access_log will be in access_log.tar
-				and error_log will be in
-				error_log.tar. If you wish to change
-				the default behavior and specify a
-				single file for all logs in a
-				particular directory to be stored in,
-				specify a filename. If you wish to
-				store _all_ logs (regardless of their
-				location) in a single file, specify
-				a path and filename.
-    --full-path                 store log files using the full
-				pathname relative to your home
-				directory. By default, savelogs stores
-				files in archives relative to the
-				directory in which the log file is
-				located. This option changes that
-				behavior and stores files with their
-				full path information in the archive.
-    --clobber                   overwrite without prompting existing
-				compressed archives. This option is
-				on by default. To turn this behavior
-				off (i.e., to tell savelogs to prompt
-				before compressing archives), use
-				'--noclobber' or 'Clobber off' in your
-				configuration file.
+    --tar=path/to/tar
+    --zip=path/to/zip
+    --archive=archive_name.tar
+    --full-path
+    --clobber
 
     See savelogs(1) for more information.
 _USAGE_
@@ -2225,6 +2173,8 @@ B<savelogs> saves your log files in a nice way (by default).
     savelogs --config=/etc/savelogs.conf
 
     savelogs --period=15 /var/log/messages
+
+    savelogs --apacheconf=/www/conf/httpd.conf --apachehost=foo.com
 
 =head1 DESCRIPTION
 
@@ -2293,7 +2243,7 @@ Do all of the phases.
 
 A typical B<savelogs> session might begin by typing this command:
 
-    savelogs --process=all /var/log/messages
+    savelogs /var/log/messages
 
 After which the following phases will execute:
 
@@ -2301,30 +2251,23 @@ After which the following phases will execute:
 
 =item I<move>
 
-/var/log/messages --> /var/log/messages.010523
+The log file is renamed:
 
-=item I<filter>
-
-(no filter supplied, so skip this phase)
-
-=item I<archive>
-
-add messages.010523 to /var/log/messages.tar
+    /var/log/messages --> /var/log/messages.010523
 
 =item I<compress>
 
-/var/log/messages.tar --> /var/log/messages.tar.gz
+The log file is compressed
 
-=item I<delete>
-
-(/var/log/messages.010523 is deleted)
+    /var/log/messages.010523 --> /var/log/messages.010523.gz
 
 =back 4
 
 =head2 A Word About Paths
 
 All paths you specify to B<savelogs> should be relative to your home
-directory. You do not need to use a tilde (~). You may assume that
+directory (if you're the root user--uid 0--your home directory is set
+to '/'). You do not need to use a tilde (~). You may assume that
 B<savelogs> runs from your home directory and knows how to handle
 absolute paths.
 
@@ -2403,7 +2346,7 @@ itself). For example, if you had a cronjob that did this:
 file (call it ~/etc/savelogs1.conf) that would do the same thing:
 
     Process         delete
-    PostMoveHook    /usr/local/bin/restart_apache
+    PostMoveHook    /usr/local/apache/bin/apachectl graceful
     ApacheConf      /www/conf/httpd.conf
 
 and then invoke your cron like this:
@@ -2429,7 +2372,8 @@ ARE case-sensitive.
     ApacheConf    /www/CONF/httpd.conf
     ApacheConf    /www/conf/Httpd.conf
 
-are four distinct files.
+are four distinct files, depending on the case-sensitivity of your
+operating system.
 
 =head2 Testing configurations
 
@@ -2784,6 +2728,29 @@ through F<httpd.conf> looking for all files associated with
 B<TransferLog>, B<ErrorLog>, B<AgentLog>, etc. (all those listed in
 the B<ApacheLog> directive) and process them.
 
+=item B<ApacheHost>
+
+This option tells B<savelogs> which logs to select out of the Apache
+configuration file (as specified by the B<ApacheConf> directive) based
+on the Apache B<ServerName> directive in the B<VirtualHost> block. If
+this option is set, only logs for matching hosts will be rotated (this
+applies only to logs found in the Apache configuration file; other
+logs specified in other ways (e.g., on the command-line or via the
+B<Log> directive) will be processed as usual).
+
+Example:
+
+    savelogs --apacheconf=/www/conf/httpd.conf --apachehost=foo.com
+
+or in your configuration file:
+
+    ApacheConf /www/conf/httpd.conf
+    ApacheHost foo.com
+
+The B<ApacheHost> directive may be specified multiple times to process
+logs for multiple virtual hosts. If no logs are found in the Apache
+B<VirtualHost> block, no logs will be rotated for that virtual host.
+
 =item B<ApacheLog>
 
 This option allows you to tell B<savelogs> which logs to process in
@@ -2857,6 +2824,9 @@ the command-line:
 
     % savelogs --apachelogexclude= --config=/etc/savelogs.conf
 
+Logs that Apache writes via a pipe must be specified separately using
+the B<Log> directive or on the command-line.
+
 =item B<ApacheInclude>
 
 When specified, this directive tells B<savelogs> to read the Apache
@@ -2877,6 +2847,11 @@ twice (thus avoiding those annoying infinite loops).
 Example:
 
     % savelogs --apacheconf=/www/conf/httpd.conf --apacheinclude
+
+or in your configuration file:
+
+    ApacheConf    /www/conf/httpd.conf
+    ApacheInclude yes
 
 =back
 
@@ -3123,6 +3098,40 @@ putting it into a shell script that "wraps" all of your options.
 Executes the B<postmovehook> command even if there are no logs to
 process. By default, B<savelogs> will not execute the B<postmovehook>
 command if there are no logs.
+
+=item B<chown=uid:gid>
+
+After B<savelogs> has renamed your log(s), you may wish to chown them
+to a new user or group. Use the B<chown> option for this. If you don't
+specify a user, the user will not change. If you don't specify a
+group, the group won't change.
+
+    ## chown the logs to joe:joegroup
+    Chown    joe:joegroup
+
+    ## make the log files owned by the group with gid 500, keep the
+    ## current owner
+    Chown    :500
+
+    ## change the owner to root, leave the group alone
+    Chown    root:
+
+Notice that the colon is necessary at all times.
+
+The B<chown> option executes after the B<PostMoveHook> phase has
+completed.
+
+=item B<chmod>
+
+After B<savelogs> has renamed your log(s), you may wish to change the
+permissions of the logfile. Use the B<chmod> option for this.
+Permissions should be specified in octal.
+
+    ## make readable only by the owner
+    Chmod    0600
+
+The B<chmod> option executes after the B<PostMoveHook> phase has
+completed.
 
 =item B<stem>
 
@@ -3643,6 +3652,23 @@ on the "to do" list.
 
 =back
 
+=head1 WISHLIST/TODO
+
+=over 4
+
+=item *
+
+Would be nice to use the VirtualHost 'User' directive for the B<chown>
+option. Maybe a 'ApacheChown' option.
+
+=item *
+
+Optimize the ApacheHost directive to jump out of the Apache config
+parsing once all hosts have been found (can you have a VirtualHost
+block appear twice with the same ServerName directive?)
+
+=back
+
 =head1 ACKNOWLEDGEMENTS
 
 =over 4
@@ -3662,9 +3688,6 @@ Scott Wiersdorf, E<lt>scott@perlcode.orgE<gt>
 
 =head1 COPYRIGHT
 
-Copyright (c) 2001 Scott Wiersdorf. All rights reserved.
-
-This document may not be duplicated in any form without prior written
-consent of the author or his employer.
+Copyright (c) 2001-2004 Scott Wiersdorf. All rights reserved.
 
 =cut

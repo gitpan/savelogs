@@ -874,6 +874,49 @@ doesn't work (which is rare) and use a copy of the file if your
 I<StemHook> command makes changes to the file which you don't want to
 preserve.
 
+=head1 Possible Solution 4: Rotate Logs for VirtualHost
+
+As of version 1.80, you may specify a hostname for a B<VirtualHost>
+block. B<savelogs> will look for any VirtualHost blocks in the Apache
+configuration file that match the names you specify and process any
+logs found.
+
+=head2 savelogs Configuration File
+
+    ## ==== begin savelogs-3d.conf ==== ##
+
+    ApacheConf  /www/conf/httpd.conf
+    ApacheHost  www.domain.name1
+    ApacheHost  www.domain.name3
+    PostMoveHook /usr/local/apache/bin/apachectl restart
+
+    ## ===== end savelogs-3d.conf ===== ##
+
+=head2 Solution Results
+
+After running B<savelogs> with the above configuration file, we'll
+have the following changes:
+
+    -rw-r--r--  1 server  vuser        0 Sep 13 23:07 access_log-domain.name1
+    -rw-r--r--  1 server  vuser     9360 Sep 13 23:06 access_log-domain.name1.010913.gz
+    -rw-r--r--  1 server  vuser        0 Sep 13 23:07 access_log-domain.name3
+    -rw-r--r--  1 server  vuser     1040 Sep 13 23:06 access_log-domain.name3.010913.gz
+    -rw-r--r--  1 server  vuser        0 Sep 13 23:07 error_log-domain.name1
+    -rw-r--r--  1 server  vuser      859 Sep 13 23:06 error_log-domain.name1.010913.gz
+    -rw-r--r--  1 server  vuser     3442 Sep 13 23:07 error_log-domain.name2
+    -rw-r--r--  1 server  vuser        0 Sep 13 23:07 error_log-domain.name3
+    -rw-r--r--  1 server  vuser      661 Sep 13 23:06 error_log-domain.name3.010913.gz
+
+Notice that no changes were made to error_log-domain.name2 since it
+wasn't specified in the savelogs configuration file.
+
+=head2 Solution Explanation
+
+The new B<ApacheHost> directive tells B<savelogs> to only process log
+files for Apache B<VirtualHost> blocks whose B<ServerName> directive
+matches one of the specified host names. The B<ApacheHost> directive
+may be given multiple times to process multiple hosts.
+
 =head1 EXAMPLE 4: Filtering logs
 
 We do not have F<root.exe> or F<cmd.exe> on our web server and we

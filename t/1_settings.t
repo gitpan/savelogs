@@ -1,5 +1,5 @@
 use Test;
-BEGIN { $| = 1; plan(tests => 70); chdir 't' if -d 't'; }
+BEGIN { $| = 1; plan(tests => 73); chdir 't' if -d 't'; }
 require 'savelogs.pl';
 
 use vars qw(
@@ -286,5 +286,17 @@ ok( $settings_new->{'stemlink'}, 'copy' );
 ## touch
 $settings_new = settings(`$savelogs --touch --settings 2>&1`);
 ok( $settings_new->{'touch'}, '1' );
+
+## chown
+$settings_new = settings(`$savelogs --chown=root:wheel --settings 2>&1`);
+ok( $settings_new->{'chown'}, 'root:wheel' );
+
+## chmod
+$settings_new = settings(`$savelogs --chmod=0640 --settings 2>&1`);
+ok( $settings_new->{'chmod'}, '0640' );
+
+## apachehost
+$settings_new = settings(`$savelogs --apachehost="foo.com" --settings 2>&1`);
+ok( $settings_new->{'apachehost'}, '( foo.com )' );
 
 exit;

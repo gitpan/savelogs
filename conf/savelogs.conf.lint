@@ -40,6 +40,12 @@ LogLevel                1
 ## create a new zero-length log file after moving each log?
 Touch                    no
 
+## change ownership of the logs after moving them to this user
+#Chown                   someuser
+
+## change permissions of the logs after moving them to these
+#Chmod                   0600
+
 ## rotate logs based on a period (i.e., how often you run savelogs)
 ## If you use the 'Period' option, you should also use 'Count' and
 ## the 'move' and 'compress' options for the 'Process' directive.
@@ -79,6 +85,15 @@ ApacheLogExclude        ^/dev/null$
 ## directory. Uncomment this if you want savelogs to find your logs
 ## for you
 #ApacheConf              /usr/local/etc/httpd/conf/httpd.conf
+
+## whether we follow Apache 'Include' directives in the Apache
+## configuration file.
+#ApacheInclude            no
+
+## names of hosts whose logs we want to rotate. If specified, no other
+## logs found in the Apache configuration file will be processed.
+#ApacheHost               foo.com
+#ApacheHost               bar.com
 
 ## what to look for in httpd.conf as a log file. This directive
 ## doesn't apply unless ApacheConf is specified

@@ -1,6 +1,36 @@
 ChangeLog for savelogs
 =============================================================================
 
+*Release 1.81*
+----------------------------
+revision 1.12
+date: 2004/08/30 18:02:43;  author: scottw;  state: Exp;  lines: +17 -19
+- fix bug in how hosts are gathered via ApacheHost directive
+- additional documentation
+----------------------------
+revision 1.11
+date: 2004/08/23 19:03:22;  author: scottw;  state: Exp;  lines: +2 -2
+- fix version date
+----------------------------
+revision 1.10
+date: 2004/08/23 18:59:13;  author: scottw;  state: Exp;  lines: +7 -4
+- add item to "todo" list
+----------------------------
+revision 1.9
+date: 2004/08/23 18:48:47;  author: scottw;  state: Exp;  lines: +1 -1
+- add new directives to lint
+- minor doc fixes
+----------------------------
+revision 1.8
+date: 2004/08/23 18:35:07;  author: scottw;  state: Exp;  lines: +30 -0
+- documentation updates
+----------------------------
+revision 1.7
+date: 2004/08/23 18:14:37;  author: scottw;  state: Exp;  lines: +178 -186
+- add chown directive
+- add chmod directive
+- add apachehost directive (find logs by hostname in VirtualHost block)
+
 *Release 1.70*
 ----------------------------
 revision 1.6

@@ -59,7 +59,7 @@ Include     more_httpds
 _CONF_
 close CONFIG;
 
-## found by globbing; has a link back to a
+## found by globbing; has a link back to 'a'
 open CONFIG, ">httpd_h.conf"
   or die "Could not write config file: $!\n";
 print CONFIG <<_CONF_;
