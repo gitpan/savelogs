@@ -24,8 +24,8 @@ $settings = settings(`$savelogs --settings 2>&1`);
 
 ## test default values (compatibility errors)
 ok( $settings->{'apacheconf'}, 	     'undef' );
-ok( $settings->{'apachelog'},  	     'TransferLog|ErrorLog|AgentLog|RefererLog|CustomLog' );
-ok( $settings->{'apachelogexclude'}, '( ^/dev/null$, \| )' );
+ok( $settings->{'apachelog'},  	     '(?i-xsm:^\s*(?:TransferLog|ErrorLog|AgentLog|RefererLog|CustomLog)\s+(\S+))' );
+ok( $settings->{'apachelogexclude'}, '(?-xism:^/dev/null$|\|)' );
 ok( $settings->{'archive'},          'undef' );
 ok( $settings->{'clobber'},   	     '1' );
 $bin = `which compress 2>/dev/null | grep -v 'no compress'`; chomp $bin; unless( $bin =~ /compress/ ) { $bin = '' }

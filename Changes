@@ -1,6 +1,29 @@
 ChangeLog for savelogs
 =============================================================================
 
+*Release 1.70*
+----------------------------
+revision 1.6
+date: 2003/08/14 20:15:47;  author: scottw;  state: Exp;  lines: +64 -26
+- new ApacheInclude directive; follows Apache's Include directive to
+  find more log files.
+----------------------------
+revision 1.5
+date: 2003/08/04 16:30:07;  author: scottw;  state: Exp;  lines: +170 -81
+- add code to follow Apache 'Include' directives
+
+*Release 1.66*
+----------------------------
+revision 1.4
+date: 2003/03/18 17:00:21;  author: scottw;  state: Exp;  lines: +14 -1
+- add acknowledgements
+
+*Release 1.65*
+----------------------------
+revision 1.3
+date: 2003/03/17 23:32:47;  author: scottw;  state: Exp;  lines: +1 -1
+- use blib/script/savelogs for tests
+
 *Release 1.63*
 ----------------------------
 revision 1.2

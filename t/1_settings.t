@@ -47,11 +47,11 @@ ok( $settings_new->{'apacheconf'}, 'www/foo/httpd.conf' );
 
 ## apachelog
 $settings_new = settings(`$savelogs --apachelog=TransferLog --settings 2>&1`);
-ok( $settings_new->{'apachelog'}, 'TransferLog' );
+ok( $settings_new->{'apachelog'}, '(?i-xsm:^\s*(?:TransferLog)\s+(\S+))' );
 
 ## apachelogexclude
 $settings_new = settings(`$savelogs --apachelogexclude= --settings 2>&1`);
-ok( $settings_new->{'apachelogexclude'}, '(  )' );
+ok( $settings_new->{'apachelogexclude'}, '' );
 
 ## clobber
 $settings_new = settings(`$savelogs --clobber --settings 2>&1`);

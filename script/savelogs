@@ -15,7 +15,7 @@ use vars qw($VERSION $BUILD);
 
 my $prognam = $0;
 $prognam    =~ s!^.*/([^/]+)$!$1!;
-$VERSION    = '1.66';
+$VERSION    = '1.70';
 $BUILD      = sprintf("%d/%02d/%02d", q$Date: 2003/03/13 18:21:53 $ =~ 
 		      m!(\d{1,4})/(\d{1,2})/(\d{1,2})!);
 
@@ -51,6 +51,7 @@ my %config = (
 	      'apacheconf'       => undef,
 	      'apachelog'        => 'TransferLog|ErrorLog|AgentLog|RefererLog|CustomLog',
 	      'apachelogexclude' => [ qw(^/dev/null$ \|) ],
+	      'apacheinclude'    => undef,
 
 	      'log'              => [],
 	      'nolog'            => [],
@@ -112,6 +113,7 @@ unless( GetOptions(\%opt,
 		   'apachelog=s',
 		   'apachelogexclude:s',
 		   \@{$opt{'apachelogexclude'}},
+		   'apacheinclude',
 
 		   'log:s',
 		   \@{$opt{'log'}},
@@ -315,6 +317,19 @@ DEFAULTS: {
 	$config{'process'} = join(',', @opts);
     }
 
+    ## fixup apache directives
+    if( $config{'apachelog'} ) {
+	$config{'apachelog'} = qr/^\s*(?:$config{'apachelog'})\s+(\S+)/io;
+    }
+
+    if( @{$config{'apachelogexclude'}} ) {
+	$config{'apachelogexclude'} = join('|', @{$config{'apachelogexclude'}} );
+	$config{'apachelogexclude'} = qr($config{'apachelogexclude'})o
+	  if $config{'apachelogexclude'};  ## if one empty element is passed, this
+                                           ## will make sure we don't create an empty
+                                           ## regex (which matches everything)
+    }
+
     ## fixup count; quietly decrement it to DWIM
     if( defined $config{'count'} ) {
 	## decrement $config{count} to no lower than zero. Zero always
@@ -411,24 +426,24 @@ write_log( LEVEL3, "Changed directory to '" . $config{'home'} . "'" );
 ## -- phase 0: fetch logs to process -- ##
 FETCH_LOGS:
 {
-    my $logs;             ## list reference of files
+    my @loggies;          ## list of log files
     my %log_inodes = ();  ## uniqify log file list
 
     ## fetch logs from apacheconf directive
-    $logs = fetch_apache_logs( $config{'apacheconf'} );
+    @loggies = fetch_apache_logs( $config{'apacheconf'} );
 
     ## fetch log directives (internal regex expansion)
-    push @$logs, regex_expand(@{$config{'log'}});
+    push @loggies, regex_expand(@{$config{'log'}});
 
     ## now push any logs from the command-line (command-line globbing)
-    push @$logs, @ARGV;
+    push @loggies, @ARGV;
 
     ## fetch nologs directives
     my %nolog = map { make_log_entry($_)->{'fulllog'} => 1 } regex_expand(@{$config{'nolog'}});
     my %nolog_inodes = map { (lstat($_))[1] => 1 } keys %nolog;
 
     ## make log entries (our own special internal data structure)
-    for my $log ( @$logs ) {
+    for my $log ( @loggies ) {
 	my $full_log = $config{'home'} . $log;
 	debug( LEVEL1, "P0: Creating log entry for '$log'" );
 	my $inode = (lstat($full_log))[1]
@@ -1315,7 +1330,7 @@ sub clean_path {
 	if( $file =~ m/^(.*)$/ ) {
 	    $file = $1;
 	}
-	debug( LEVEL1, "clean_path: \$file cleaned to $file" );
+	debug( LEVEL1, "clean_path: \$file cleaned to '$file'" );
     }
 }
 
@@ -1490,96 +1505,185 @@ sub parse_command_line {
     return 1;
 }
 
-sub fetch_apache_logs {
-    my $httpd_conf = shift;
-    local $_;
-    my @logs = ();
+APACHE_CONF: {
+    ## the purpose of this block is to give lexical context to %conf
+    ## so it becomes a static variable that will survive recursion
+    my @conf = ();
+    my %conf = ();
     my $server_root;
-    my $apachelog_re        = $config{'apachelog'};
-    my $apachelogexclude_re = join( '|', @{$config{'apachelogexclude'}} );
 
-    ## make sure apachelog is set. This shouldn't be an issue because
-    ## we force command-line and config file to have a value for this
-    ## directive.
-    unless( $config{'apachelog'} ) {
-	write_log( LEVEL2, "No apachelog directive found. Skipping apache configuration file." );
-	return [];
-    }
+    sub fetch_apache_logs {
+	my $httpd_conf = shift;  ## should be relative to $config{home} and leading slash stripped
+	my @logs = ();
 
-    ## make sure file exists
-    unless( $httpd_conf ) {
-	write_log( LEVEL2, "Skipping empty ApacheConf file." );
-	return [];
-    }
-
-    unless( -f $httpd_conf ) {
-	write_log( LEVEL2, "Skipping ApacheConf file '$httpd_conf': file does not exist." );
-	return [];
-    }
-
-    ## setup apache log regular expression
-    $apachelog_re = qr/$apachelog_re/;
-    debug( LEVEL1, "Log search pattern set to '$apachelog_re' " );
-
-    ## setup apache log exclude regular expression
-    if( $config{'apachelogexclude'} ) {
-	$apachelogexclude_re = qr/$apachelogexclude_re/;
-	debug( LEVEL1, "Exclude pattern set to '$apachelogexclude_re'" );
-    }
-
-    ## read apache configuration file
-    open HTTPD, $httpd_conf
-      or do {
-	  write_log( LEVEL0, "Skipping ApacheConf directive: Could not open $httpd_conf: $!\n" );
-	  return [];
-      };
-
-    while( <HTTPD> ) {
-	## skip comments
-	next if /^\#/;            ## escape needed for emacs happiness
-
-	## find server root
-	if( /^ServerRoot\s+(.+)$/i ) {
-	    $server_root = $1;
-	    next;
+	## make sure apachelog is set. This shouldn't be an issue because
+	## we force command-line and config file to have a value for this
+	## directive.
+	unless( $config{'apachelog'} ) {
+	    write_log( LEVEL2, "No apachelog directive found. Skipping apache configuration file." );
+	    return;
 	}
 
-	## skip non-log directives. We grab the first argument after
-	## the log directive because CustomLog takes multiple format
-	## arguments after the log name.
-	##
-	## We grab all the non-whitespace characters immediately after
-	## the log directive.
-	##
-	unless( /^\s*(?:$apachelog_re)\s+(\S+)/io ) {
-	    next;
-	}
-	my $log_entry = $1;
+	return unless $httpd_conf;
 
-	## skip excluded patterns
-	if( $config{'apachelogexclude'} ) {
-	    if( $log_entry =~ /$apachelogexclude_re/o ) {
-		write_log( LEVEL3, "Skipping '$log_entry': Exclude pattern match." );
-		next;
+
+	## find logging directives in Apache configuration file
+	## $config{'home'} must be prepended to $httpd_conf to create
+	## the "real" path to the configuration file.
+      FIND_LOGS: {
+
+	    ## expand httpd_conf variable (it may be a directory or a wildcard)
+	  EXPAND_CONF: {
+		## directory check
+		if( -d $config{'home'} . $httpd_conf ) {
+		    opendir DIR, $config{'home'} . $httpd_conf
+		      or do {
+			  warn "Could not open $httpd_conf: $!\n";
+			  return;
+		      };
+		    my @dirs = map { $httpd_conf . '/' . $_ } grep { !/^\.\.?$/ } readdir DIR;
+		    closedir DIR;
+
+		    push @logs, fetch_apache_logs($_) for @dirs;
+		    last FIND_LOGS;
+		}
+
+		## this will expand any wildcards
+		my @glob_conf = grep { s!^$config{'home'}!! } glob $config{'home'} . $httpd_conf;
+		if( scalar @glob_conf > 1 ) {
+		    debug( LEVEL1, "Found " . scalar @glob_conf . " config files from glob '$httpd_conf'" );
+		    push @logs, fetch_apache_logs($_) for @glob_conf;
+		    last FIND_LOGS;
+		}
+	    }
+
+	    ## flag this conf file (or directory or glob) as "seen" so we
+	    ## don't process it again
+	  INO: {
+		debug( LEVEL1, "Checking '$httpd_conf' inode for duplicate processing" );
+
+		## stat will give us the target of any symlinks
+		my $ino = (stat($config{'home'} . $httpd_conf))[1];
+		unless( $ino ) {
+		    write_log( LEVEL0, "Skipping '$httpd_conf': Could not stat: $!\n" );
+		    return;
+		}
+
+		## check for previous try
+		if( exists $conf{$ino} ) {
+		    write_log( LEVEL2, "Skipping '$httpd_conf': already processed this session" );
+		    return;
+		}
+
+		push @conf, $httpd_conf;    ## preserve ordering
+		$conf{$ino} = $httpd_conf;  ## remember visited inodes (to avoid loops)
+	    }
+
+
+	    unless( -f $config{'home'} . $httpd_conf ) {
+		write_log( LEVEL2, "Skipping ApacheConf file '$httpd_conf': file does not exist." );
+		return;
+	    }
+
+	    ## setup apache log regular expression
+	    debug( LEVEL1, "Log search pattern set to '$config{apachelog}' " );
+
+	    ## setup apache log exclude regular expression
+	    if( $config{'apachelogexclude'} ) {
+		debug( LEVEL1, "Exclude pattern set to '$config{apachelogexclude}'" );
+	    }
+
+	    ## read apache configuration file
+	    my $HTTPD;
+	  SERVER_ROOT: {
+		if( open $HTTPD, $config{'home'} . $httpd_conf ) {
+
+		    ## we allow only one ServerRoot directive
+		    last SERVER_ROOT if defined $server_root;
+
+		    ## get server root
+		    local $_;
+		    while( <$HTTPD> ) {
+			next unless /^ServerRoot\s+(.+)\s*$/i;
+			$server_root = $1;
+			clean_path($server_root);
+			$server_root .= '/' if $server_root && $server_root !~ m!/$!;
+			debug( LEVEL1, "ServerRoot set to '$server_root'" );
+			last;
+		    }
+
+		    unless( defined $server_root ) {
+			close $HTTPD;
+			write_log( LEVEL0, "Skipping ApacheConf directive: No server root found in $httpd_conf.\n" );
+			return;
+		    }
+		}
+		else {
+		    write_log( LEVEL0, "Skipping ApacheConf directive: Could not open $httpd_conf: $!\n" );
+		    return;
+		}
+	    }
+
+	    ## now parse the rest of the config file for log directives
+	    seek $HTTPD, 0, 0;
+	    while( <$HTTPD> ) {
+		## skip comments
+		next if /^\#/;            ## escape needed for emacs happiness
+
+		## process include directives, if desired
+		if( $config{'apacheinclude'} && /^\s*Include\s+(.+?)\s*$/i ) {
+		    my $include = $1;
+
+		    ## relative paths need fixup
+		    unless( m!^/! =~ $include ) {
+			debug( LEVEL1, "Appending '$server_root' to include file $include" );
+			$include = $server_root . $include;
+		    }
+
+		    debug( LEVEL1, "Recursively searching '$include' now..." );
+		    push @logs, fetch_apache_logs($include);
+		    next;
+		}
+
+		## skip non-log directives. We grab the first argument after
+		## the log directive because CustomLog takes multiple format
+		## arguments after the log name.
+		##
+		## We grab all the non-whitespace characters immediately after
+		## the log directive.
+		##
+		next unless /$config{'apachelog'}/;
+		my $log_entry = $1;
+
+		## skip excluded patterns
+		if( $config{'apachelogexclude'} ) {
+		    if( $log_entry =~ $config{'apachelogexclude'} ) {
+			write_log( LEVEL3, "Skipping '$log_entry': Exclude pattern match." );
+			next;
+		    }
+		}
+
+		## found a log entry
+		push @logs, $log_entry;
+		debug( LEVEL1, "Found '$log_entry' in '$httpd_conf'" );
+	    }
+	    close $HTTPD;
+
+	} ## FIND_LOGS;
+
+	## if the log name begins with a /, we don't prepend $server_root
+	for my $log ( @logs ) {
+	    unless( $log =~ m!^/! ) {
+		unless( $log =~ m!^$server_root! ) {
+		    $log = $server_root . $log;
+		}
 	    }
 	}
-
-	## found a log entry
-	push @logs, $log_entry;
-	debug( LEVEL1, "Found '$log_entry' in '$httpd_conf'" );
-    }
-    close HTTPD;
-
-    ## make sure we found the server root
-    unless( $server_root ) {
-	write_log( LEVEL0, "Skipping ApacheConf directive: No server root found in $httpd_conf.\n" );
-	return [];
+	return @logs;
+#	return map { ( m!^/! ? $_ : $server_root . $_ ) } @logs;
     }
 
-    ## if the log name begins with a /, we don't prepend $server_root
-    my @full_logs = map { ( m!^/! ? $_ : $server_root . '/' . $_ ) } @logs;
-    return \@full_logs;
-}
+} ## APACHE_CONF;
 
 ## takes a log file name and returns a log entry reference
 ## we're careful to remove leading slashes from absolute pathnames in
@@ -1983,6 +2087,8 @@ How savelogs finds your log files:
 				be removed and all log files will be
 				processed (if they match other
 				criteria).
+    --apacheinclude             if set, Apache 'Include' directives
+                                will be honored and followed.
 
 How savelogs renames your files:
     --sep[=character]           the character to use to separate the
@@ -2750,6 +2856,27 @@ run B<savelogs>, you can give an empty B<apachelogexclude> option on
 the command-line:
 
     % savelogs --apachelogexclude= --config=/etc/savelogs.conf
+
+=item B<ApacheInclude>
+
+When specified, this directive tells B<savelogs> to read the Apache
+configuration file (F<httpd.conf>) and follow I<Inlcude> directives
+(see http://httpd.apache.org/docs/mod/core.html#include for details).
+
+It will work just like Apache does: it will look in directories (when
+a directory is given as the I<Include> option), it will expand path
+wildcards (e.g., C<httpd_[bcd].conf> will expand to F<httpd_b.conf>,
+F<httpd_c.conf>, and F<httpd_d.conf>), and it will work with simple
+include files as well (e.g., C<virtual_hosts.conf>).
+
+Log files found in I<Include>'ed configuration files will also be
+processed. B<savelogs> has internal consistency checks to ensure that
+logs are not processed twice, neither are configuration files read
+twice (thus avoiding those annoying infinite loops).
+
+Example:
+
+    % savelogs --apacheconf=/www/conf/httpd.conf --apacheinclude
 
 =back
 
