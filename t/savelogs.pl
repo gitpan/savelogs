@@ -1,5 +1,5 @@
 use vars qw($savelogs);
-$savelogs = '../script/savelogs';
+$savelogs = '../blib/script/savelogs';  # '../script/savelogs';
 
 sub settings {
     my @settings = @_;
