@@ -1,5 +1,5 @@
 use Test;
-BEGIN { $| = 1; plan(tests => 71); chdir 't' if -d 't'; }
+BEGIN { $| = 1; plan(tests => 70); chdir 't' if -d 't'; }
 require 'savelogs.pl';
 
 use vars qw(
@@ -15,9 +15,33 @@ $bindir = '..';
 $settings = settings(`$bindir/savelogs --settings 2>&1`);
 
 ## binaries
-for my $bin (qw( gzip gtar tar compress uncompress )) {
-    my $binpath = `which $bin`; chomp $binpath;
-    $settings_new = settings(`$bindir/savelogs --$bin=$binpath --settings 2>&1`);
+for my $bin (qw( gzip compress uncompress )) {
+    my $binpath = `which $bin 2>/dev/null | head -1 | grep -v 'no $bin'`;
+    my $arg = '';
+    if( $binpath ) {
+	chomp $binpath;
+	$arg = "--$bin=$binpath";
+    }
+    else {
+	$binpath = '';
+    }
+    $settings_new = settings(`$bindir/savelogs $arg --settings`);
+    ok( $settings_new->{$bin}, $binpath );
+}
+
+## tar and gtar are special because gtar is always preferred
+for my $bin ( qw(gtar tar) ) {
+    my $binpath = `which gtar tar 2>/dev/null | head -1 | grep -v 'no '`;
+    my $arg = '';
+    if( $binpath ) {
+	chomp $binpath;
+	$arg = "--$bin=$binpath";
+    }
+    else {
+	$binpath = '';
+    }
+
+    $settings_new = settings(`$bindir/savelogs $arg --settings`);
     ok( $settings_new->{$bin}, $binpath );
 }
 
@@ -38,10 +62,6 @@ $settings_new = settings(`$bindir/savelogs --clobber --settings 2>&1`);
 ok( $settings_new->{'clobber'}, '1' );
 $settings_new = settings(`$bindir/savelogs --noclobber --settings 2>&1`);
 ok( $settings_new->{'clobber'}, '0' );
-
-## compress
-$settings_new = settings(`$bindir/savelogs --gzip=/usr/bin/gzip --settings 2>&1`);
-ok( $settings_new->{'gzip'}, '/usr/bin/gzip' );
 
 ## config
 $settings_new = settings(`$bindir/savelogs --config=/etc/foo.conf --settings 2>&1`);
@@ -217,11 +237,11 @@ ok( $settings_new->{'process'}, 'all' );
 
 ## process + archive
 $settings_new = settings(`$bindir/savelogs --period --filter=foo --archive=bob.tar --settings 2>&1`);
-ok( $settings_new->{'process'}, 'move,filter,compress' );
+ok( $settings_new->{'process'}, 'move,filter,archive,compress' );
 
 ## process + archive
 $settings_new = settings(`$bindir/savelogs --period --archive=bob.tar --settings 2>&1`);
-ok( $settings_new->{'process'}, 'move,compress' );
+ok( $settings_new->{'process'}, 'move,archive,compress' );
 
 ## process + archive
 $settings_new = settings(`$bindir/savelogs --process=archive --archive=bob.tar --settings 2>&1`);

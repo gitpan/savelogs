@@ -3,7 +3,7 @@ sub settings {
     my %settings;
 
     for ( @settings ) {
-	my($key,$value) = $_ =~ m/^\s*SET: (\S+)\s*=>\s+(.+)$/;
+	my($key,$value) = $_ =~ m/^\s*SET: (\S+)\s*=>\s+(.*)$/;
 	next unless $key;
 	$settings{$key} = $value;
     }

@@ -32,8 +32,8 @@ sub MY::post_constants {
     return qq!
 VTMPDIR        = _tmp.\$(DISTNAME)
 CONF           = $confdir
-INST_CONFDIR   = blib/etc
-INSTALLCONFDIR = /etc
+INST_CONFDIR   = blib/usr/local/etc
+INSTALLCONFDIR = /usr/local/etc
 !;
 }
 
@@ -62,7 +62,7 @@ sub MY::postamble {
     push @m, "all :: $confdir\n";
     push @m, "\t\@\$(NOOP)\n\n";
 
-    ## put @conf_files in their blib/etc home
+    ## put @conf_files in their blib/usr/local/etc home
     for my $conf ( @conf_files ) {
 	push @m, "\$(INST_CONFDIR)/$conf: \$(CONF)/$conf.PL Makefile \$(INST_CONFDIR)/.exists\n";
 	push @m, "\t\@rm -f \$(INST_CONFDIR)/$conf\n";

@@ -35,7 +35,7 @@ copy_file( $src, $log )
   or die "Could not copy '$src' to '$log': $!\n";
 ok(1);
 
-system( "$bindir/savelogs --home=. --process=filter --filter='egrep -v \"/images/\" \$LOG | egrep -v \"(root|cmd)\\.exe\" -' $log" );
+system( "$bindir/savelogs --home=. --process=filter --filter='egrep -v \"/images/\" \$LOG | egrep -v \"(root|cmd)\\.exe\"' $log" );
 $lines = `wc -l $log`;
 chomp $lines;
 $lines =~ s/^\s*(\d+).+$/$1/;

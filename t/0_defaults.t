@@ -7,6 +7,7 @@ use vars qw(
 	    $result
 	    $settings
 	    $home
+	    $bin
 	   );
 
 ## setup bindir
@@ -30,7 +31,8 @@ ok( $settings->{'apachelog'},  	     'TransferLog|ErrorLog|AgentLog|RefererLog|C
 ok( $settings->{'apachelogexclude'}, '( ^/dev/null$, \| )' );
 ok( $settings->{'archive'},          'undef' );
 ok( $settings->{'clobber'},   	     '1' );
-ok( $settings->{'compress'},  	     'undef' );
+$bin = `which compress 2>/dev/null | grep -v 'no compress'`; chomp $bin; unless( $bin =~ /compress/ ) { $bin = '' }
+ok( $settings->{'compress'},  	     $bin );
 ok( $settings->{'config'},    	     'undef' );
 ok( $settings->{'count'},     	     '9' );
 ok( $settings->{'datefmt'},          '%y%m%d' );
@@ -41,8 +43,10 @@ ok( $settings->{'filter'},    	     'undef' );
 ok( $settings->{'force-pfh'},        'undef' );
 ok( $settings->{'force-pmh'},        'undef' );
 ok( $settings->{'full-path'}, 	     'undef' );
-ok( $settings->{'gtar'},      	     'undef' );
-ok( $settings->{'gzip'},      	     'undef' );
+$bin = `which gtar 2>/dev/null | grep -v 'no gtar'`; chomp $bin; unless( $bin =~ /gtar/ ) { $bin = '' }
+ok( $settings->{'gtar'},      	     $bin );
+$bin = `which gzip 2>/dev/null | grep -v 'no gzip'`; chomp $bin; unless( $bin =~ /gzip/ ) { $bin = '' }
+ok( $settings->{'gzip'},      	     $bin );
 ok( $settings->{'help'},      	     'undef' );
 ok( $settings->{'home'},      	     $home );
 ok( $settings->{'hourly'},    	     'undef' );
@@ -59,9 +63,11 @@ ok( $settings->{'size'},             'undef' );
 ok( $settings->{'stem'},             'today' );
 ok( $settings->{'stemhook'},         'undef' );
 ok( $settings->{'stemlink'},         'symbolic' );
-ok( $settings->{'tar'},              'undef' );
+$bin = `which gtar tar 2>/dev/null | head -1 | grep -v 'no '`; chomp $bin; unless( $bin =~ /tar/ ) { $bin = '' }
+ok( $settings->{'tar'},              $bin );
 ok( $settings->{'touch'},            'undef' );
-ok( $settings->{'uncompress'},       'undef' );
+$bin = `which uncompress 2>/dev/null | grep -v 'no uncompress'`; chomp $bin; unless( $bin =~ /uncompress/ ) { $bin = '' }
+ok( $settings->{'uncompress'},       $bin );
 ok( $settings->{'version'},          'undef' );
 exit;
 

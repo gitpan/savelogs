@@ -1,4 +1,4 @@
-#!/usr/local/bin/perl -w
+#!/usr/bin/perl -w
 use strict;
 
 ## Scott Wiersdorf
@@ -15,7 +15,7 @@ use vars qw($VERSION $BUILD);
 
 my $prognam = $0;
 $prognam    =~ s!^.*/([^/]+)$!$1!;
-$VERSION    = '1.50';
+$VERSION    = '1.62';
 $BUILD      = sprintf("%d/%02d/%02d", q$Date: 2002/06/27 18:21:53 $ =~ 
 		      m!(\d{1,4})/(\d{1,2})/(\d{1,2})!);
 
@@ -51,8 +51,10 @@ my %config = (
 	      'apacheconf'       => undef,
 	      'apachelog'        => 'TransferLog|ErrorLog|AgentLog|RefererLog|CustomLog',
 	      'apachelogexclude' => [ qw(^/dev/null$ \|) ],
+
 	      'log'              => [],
 	      'nolog'            => [],
+
 	      'gripe'            => 1,
 
 	      ## moving logs
@@ -110,10 +112,13 @@ unless( GetOptions(\%opt,
 		   'apachelog=s',
 		   'apachelogexclude:s',
 		   \@{$opt{'apachelogexclude'}},
+
 		   'log:s',
 		   \@{$opt{'log'}},
+
 		   'nolog:s',
 		   \@{$opt{'nolog'}},
+
 		   'gripe!',
 
 		   'size:i',
@@ -151,15 +156,11 @@ unless( GetOptions(\%opt,
     usage();
 }
 
-my $WHICH      = find_which() || 'which'; ## this must occur before find_binary
+my $WHICH      = find_which(); ## this must occur before find_binary
 my $SEQ_NO     = 0;  ## starting log sequence number
 my $SEP        = '.';
 my $EXT        = date_str('today');
-my $TAR        = find_binary($config{'gtar'}, $config{'tar'});
-my $ZIP        = find_binary($config{'gzip'}, $config{'compress'});
-my $GZIP       = find_binary($config{'gzip'});
-my $COMPRESS   = find_binary($config{'compress'});
-my $UNCOMPRESS = find_binary($config{'uncompress'});
+my ($GTAR, $TAR, $ZIP, $GZIP, $COMPRESS, $UNCOMPRESS);
 
 ## -- check for version -- ##
 if( $opt{'version'} ) {
@@ -203,24 +204,30 @@ clean_path( $config{'logfile'},
 	    $config{'config'},
 	    $config{'apacheconf'} );
 
-## assign the value of period to count; this would be nice to put in
-## the post-processing section below but we have to guarantee that
-## this assignment occurs before we iterate over %config
-if( $config{'period'} ) {
-    $config{'count'} = $config{'period'};
+## -- open our log. After this point we may begin to issue write_log
+##    statements -- ##
+unless( $opt{'settings'} ) {
+    open_log();
+    write_log( LEVEL1, "Savelogs begins." );
 }
 
-## -- configuration settings all done. Insert any post processing here. -- ##
-for my $key ( sort keys %config ) {
+## wherein we do all our fudging to get things just right
+DEFAULTS: {
 
-    my $value = $config{$key};
+    ## assign the value of period to count; this would be nice to put in
+    ## the post-processing section below but we have to guarantee that
+    ## this assignment occurs before we iterate over %config
+    if( $config{'period'} ) {
+	$config{'count'} = $config{'period'};
+    }
 
-    unless( defined $value ) {
-	$value = 'undef';
+    ## fixup size from kb to bytes
+    if( defined $config{'size'} ) {
+	$config{'size'} *= 1024;
     }
 
     ## if the filter option is specified, add the filter process option
-    if( $key eq 'filter' && defined $config{$key} ) {
+    if( defined $config{'filter'} ) {
 	my @opts = split(',', $config{'process'});
 
 	## check for 'none' or an empty process option: assign filter
@@ -253,7 +260,7 @@ for my $key ( sort keys %config ) {
 
     ## if the period option is given, force 'move,compress' process
     ## options
-    elsif( $key eq 'period' && defined $config{$key} ) {
+    if( defined $config{'period'} ) {
 	if( $config{'process'} =~ /\bfilter\b/i ) {
 	    $config{'process'} = 'move,filter,compress';
 	}
@@ -261,11 +268,10 @@ for my $key ( sort keys %config ) {
 	else {
 	    $config{'process'} = 'move,compress';
 	}
-	$value = $config{$key};
     }
 
     ## if the archive option is given, add the archive process option
-    elsif( $key eq 'archive' && defined $config{$key} ) {
+    if( 'archive' && defined $config{'archive'} ) {
 	my @opts = split(',', $config{'process'});
 
 	## check for 'none' or empty process option: assign archive
@@ -309,46 +315,13 @@ for my $key ( sort keys %config ) {
 	$config{'process'} = join(',', @opts);
     }
 
-    ## fixup size from kb to bytes
-    elsif( $key eq 'size' && $config{$key} ) {
-	$value = $config{$key} *= 1024;
-    }
-
     ## fixup count; quietly decrement it to DWIM
-    elsif( $key eq 'count' && defined $config{$key} ) {
-	## decrement $config{$key} to no lower than zero. Zero always
+    if( defined $config{'count'} ) {
+	## decrement $config{count} to no lower than zero. Zero always
 	## keeps one log.
-	$config{$key} = ( $config{$key} > 0 ? $config{$key} - 1 : 0 );
-	$value = $config{$key};
+	$config{'count'} = ( $config{'count'} > 0 ? $config{'count'} - 1 : 0 );
     }
 
-    ## settings specified
-    if( $opt{'settings'} ) {
-	if( ref $value eq 'ARRAY' ) {
-	    printf( "SET: %-18s =>    ( ", $key );
-	    my $values = join( ', ', @$value );
-	    print "$values )\n";
-	}
-
-	else {
-	    printf( "SET: %-18s =>    %s\n", $key, $value );
-	}
-    }
-}
-
-## settings kills us
-if( $opt{'settings'} ) {
-    exit 0;
-}
-
-## -- open our log. After this point we may begin to issue write_log
-##    statements -- ##
-open_log();
-write_log( LEVEL1, "Savelogs begins." );
-
-## -- set defaults -- ##
-DEFAULTS: 
-{
     ## find which which
     debug( LEVEL1, "DEF: Using '$WHICH' for which" );
 
@@ -363,40 +336,67 @@ DEFAULTS:
     }
     debug( LEVEL1, "DEF: Extension set to '$EXT'" );
 
-    ## set the tar binary we'd like to use
-    $TAR = find_binary('gtar','tar')
+    ## set the gtar binary
+    $GTAR = $config{'gtar'} = find_binary($config{'gtar'}, 'gtar')
       or do {
 	  write_log( LEVEL2, "Could not find a suitable archive binary (e.g., gtar)" );
+      };
+
+    ## set the tar binary we'd like to use
+    $TAR = $config{'tar'} = find_binary($config{'gtar'}, $config{'tar'}, 'gtar', 'tar')
+      or do {
+	  write_log( LEVEL2, "Could not find a suitable archive binary (e.g., tar)" );
       };
     debug( LEVEL1, "DEF: Using '$TAR' for archiving" );
 
     ## set the gzip or compress binary we want to use
-    $ZIP = find_binary('gzip', 'compress')
+    $ZIP = $config{'zip'} = find_binary($config{'gzip'}, $config{'compress'}, 'gzip', 'compress')
       or do {
 	  write_log( LEVEL2, "Could not find a suitable compression binary (e.g., gzip)" );
       };
     debug( LEVEL1, "DEF: Using '$ZIP' for file compression" );
 
     ## set gzip binary
-    $GZIP = find_binary('gzip')
+    $GZIP = $config{'gzip'} = find_binary($config{'gzip'}, 'gzip')
       or do {
 	  write_log( LEVEL2, "Could not find a suitable gzip binary." );
       };
     debug( LEVEL1, "DEF: Using '$GZIP' for gzip binary" );
 
     ## set compress binary
-    $COMPRESS = find_binary('compress')
+    $COMPRESS = $config{'compress'} = find_binary($config{'compress'}, 'compress')
       or do {
 	  write_log( LEVEL2, "Could not find a suitable compress binary." );
       };
     debug( LEVEL1, "DEF: Using '$COMPRESS' for compress binary" );
 
     ## find an uncompress binary
-    $UNCOMPRESS = find_binary('uncompress')
+    $UNCOMPRESS = $config{'uncompress'} = find_binary($config{'uncompress'}, 'uncompress')
       or do {
 	  write_log( LEVEL2, "Could not find a suitable 'uncompress' binary." );
       };
     debug( LEVEL1, "DEF: Using '$UNCOMPRESS' for uncompress binary" );
+
+}  ## DEFAULTS
+
+## print settings
+if( $opt{'settings'} ) {
+    for my $key ( keys %config ) {
+	my $value = ( defined $config{$key} ? $config{$key} : 'undef' );
+
+	## settings specified
+	if( ref $value eq 'ARRAY' ) {
+	    printf( "SET: %-18s =>    ( ", $key );
+	    my $values = join( ', ', @$value );
+	    print "$values )\n";
+	}
+
+	else {
+	    printf( "SET: %-18s =>    %s\n", $key, $value );
+	}
+    }
+
+    exit 0;
 }
 
 ## -- chdir home -- ##
@@ -1153,7 +1153,7 @@ COMPRESS:
 	## make sure we have a compression binary
 	unless( $ZIP ) {
 	    write_log( LEVEL1, "No compression binary found. Skipping compression phase." );
-	    last ARCHIVE;
+	    last COMPRESS;
 	}
 
 	## compress each archive we've created
@@ -1663,52 +1663,46 @@ sub date_str {
 
 sub find_binary {
     my @binaries = @_;
-    my $test;
-    my @test = ();
 
     ## check for user specified binary
     for my $binary ( @binaries ) {
 	next unless $binary;
-	if( defined $config{$binary} && -x $config{$binary} ) {
+
+	## use config
+	if( defined $config{$binary} && -x $config{$binary} && -f $config{$binary} ) {
 	    return $config{$binary};
 	}
-    }
 
-    ## check for path
-    $WHICH = 'which' unless $WHICH;
-    for my $binary ( @binaries ) {
-	next unless $binary;
-	open CMD, "$WHICH $binary|"
-	  or do {
-	      write_log( LEVEL1, "Could not open pipe for '$binary': $!\n" );
-	      return undef;
-	  };
-	$test = <CMD>;
-	close CMD;
+	## consult 'which' program
+	if( $WHICH ) {
+	    open CMD, "$WHICH $binary 2>/dev/null | grep -v 'no $binary' |"
+	      or do {
+		  write_log( LEVEL1, "Could not open pipe for '$binary': $!\n" );
+		  return undef;
+	      };
+	    my $test = <CMD>;
+	    close CMD;
 
-	if( $test && length $test ) {
-	    chomp $test;
-	    return $test;
+	    if( $test && length $test ) {
+		chomp $test;
+		return $test;
+	    }
 	}
-    }
 
-    ## find our own
-    for my $binary ( @binaries ) {
-	next unless $binary;
-	@test = map { "$_/$binary" } qw( /bin /sbin /usr/bin /usr/sbin 
-					 /usr/local/bin /usr/local/sbin );
-
-	for $test ( @test ) {
-	    return $test if -x $test;
+	## find our own from PATH
+	for my $test ( map { "$_/$binary" } split /:/, $ENV{PATH} ) {
+	    if( -x $test && -f $test ) {
+		return $test;
+	    }
 	}
     }
 
     ## bummer
-    return undef;
+    return '';
 }
 
 sub find_which {
-    for my $path ( qw( /usr/local/bin/which /usr/bin/which /bin/which which ) ) {
+    for my $path ( map { "$_/which" } grep { defined } split /:/, $ENV{PATH} ) {
 	return $path if -x $path;
     }
     return undef;
@@ -2644,6 +2638,26 @@ is the same as:
     Log        /var/log/messages
 
 and that F</var/log/messages> will I<not> be processed in either case.
+
+=item B<Gripe|NoGripe>
+
+B<NoGripe> tells B<savelogs> not to complain about not finding any
+log files to process. By default, B<savelogs> I<gripes> about not
+finding any log files: if you forget to specify any logs (or any
+directives such as B<ApacheConf> that find logs for you) B<savelogs>
+will complain. Also, if you specify log files to process but none of
+them exist, B<savelogs> will similarly complain.
+
+When you turn on B<NoGripe>, the complaining is stopped and
+B<savelogs> exits happily.
+
+Example:
+
+    savelogs --nogripe
+
+or in your configuration file:
+
+    Gripe      no
 
 =item B<ApacheConf=/path/to/httpd.conf>
 

@@ -16,9 +16,9 @@ use vars qw(
 
 ## setup bindir
 $bindir = '..';
-$tar    = `which gtar`; chomp $tar;
+$tar    = `which gtar 2>/dev/null`; chomp $tar;
 unless( $tar ) {
-    $tar = `which tar`; chomp $tar;
+    $tar = `which tar 2>/dev/null`; chomp $tar;
 }
 $date_ext  = POSIX::strftime('%y%m%d', localtime);
 $date_exty = POSIX::strftime('%y%m%d', localtime(time-60*60*24));

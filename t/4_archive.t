@@ -12,9 +12,9 @@ use vars qw(
 
 ## setup bindir
 $bindir = '..';
-$tar    = `which gtar`; chomp $tar;
+$tar    = `which gtar 2>/dev/null`; chomp $tar;
 unless( $tar ) {
-    $tar = `which tar`; chomp $tar;
+    $tar = `which tar 2>/dev/null`; chomp $tar;
 }
 
 ## test many log files in a common directory in a single archive

@@ -77,36 +77,36 @@ system( "$bindir/savelogs --home=. --process=move --hourly $log1" );
 ## make a log
 $log1 = make_log(1024);
 system( "$bindir/savelogs --home=. --period $log1" );
-ok( -f "$log1.0.gz" );
+ok( -f "$log1.0.gz" || -f "$log1.0.Z" );
 $size1 = -s _;
 ok( $size1 < 1024 );
 
 ## make a larger log
 system( "./makelog -r 10240 $log1" );
 system( "$bindir/savelogs --home=. --period $log1" );
-ok( -f "$log1.0.gz" );
-$size2 = -s _;
-ok( $size2 < 10540 && $size2 > 1024 );
+ok( -f "$log1.0.gz" || -f "$log1.0.Z" );
+$size2 = ( -f "$log1.0.gz" ? -s "$log1.0.gz" : -s "$log1.0.Z" );
+ok( $size2 < 20540 && $size2 > 1024 );  ## compress makes random files somewhat bigger
 
 ## check bumped logs
-ok( -f "$log1.1.gz" );
+ok( -f "$log1.1.gz" || -f "$log1.1.Z" );
 ok( -s _ == $size1 );
 
 ## make one more log
 system( "./makelog -r 8192 $log1" );
 system( "$bindir/savelogs --home=. --period $log1" );
-ok( -f "$log1.0.gz" );
-ok( -s _ < 8500 && -s _ > 800 );
-unlink "$log1.0.gz";
+ok( -f "$log1.0.gz" || -f "$log1.0.Z" );
+ok( (-s "$log1.0.gz" < 20540 && -s _ > 800) || (-s "$log1.0.Z" < 20540 && -s _ > 800) );
+unlink ("$log1.0.gz", "$log1.0.Z");
 
 ## check bumped logs
-ok( -f "$log1.2.gz" );
+ok( -f "$log1.2.gz" || -f "$log1.2.Z" );
 ok( -s _ == $size1 );
-unlink "$log1.2.gz";
+unlink ("$log1.2.gz", "$log1.2.Z");
 
-ok( -f "$log1.1.gz" );
+ok( -f "$log1.1.gz" || -f "$log1.1.Z" );
 ok( -s _ == $size2 );
-unlink "$log1.1.gz";
+unlink ("$log1.1.gz", "$log1.1.Z");
 
 
 ## -- size tests ##
