@@ -3,15 +3,12 @@ BEGIN { $| = 1; plan(tests => 53); chdir 't' if -d 't'; }
 require 'savelogs.pl';
 
 use vars qw(
-	    $bindir
 	    $tar
             @dirs
 	    $log1
             %contents
 	   );
 
-## setup bindir
-$bindir = '..';
 $tar    = `which gtar 2>/dev/null`; chomp $tar;
 unless( $tar ) {
     $tar = `which tar 2>/dev/null`; chomp $tar;
@@ -20,7 +17,7 @@ unless( $tar ) {
 ## test many log files in a common directory in a single archive
 for my $i ( 1..5 ) {
     $log1 = make_log( 1024, "test_log.$i" );
-    system( "$bindir/savelogs --home=. --process=archive --archive='test_log.tar' $log1" );
+    system( "$savelogs --home=. --process=archive --archive='test_log.tar' $log1" );
     unlink( $log1 );
 }
 ok( -f 'test_log.tar' );
@@ -41,7 +38,7 @@ system( 'mkdir', '-p', @dirs );
 for my $dir ( @dirs ) {
     for my $i ( 1..5 ) {
 	$log1 = make_log( 1024, "$dir/test_log.$dir.$i" );
-	system( "$bindir/savelogs --home=. --process=archive --archive='./test_log.tar' $log1" );
+	system( "$savelogs --home=. --process=archive --archive='./test_log.tar' $log1" );
 	unlink( $log1 );
     }
     ok( system( 'rm', '-r', $dir ), 0 );
@@ -66,7 +63,7 @@ system( 'mkdir', '-p', @dirs );
 for my $dir ( @dirs ) {
     for my $i ( 1..5 ) {
 	$log1 = make_log( 1024, "$dir/test_log.$i" );
-	system( "$bindir/savelogs --home=. --process=archive --archive='./test_log.tar' --full-path $log1" );
+	system( "$savelogs --home=. --process=archive --archive='./test_log.tar' --full-path $log1" );
 	unlink( $log1 );
     }
     ok( system( 'rm', '-r', $dir ), 0 );

@@ -32,6 +32,10 @@ DESCRIPTION
 
     savelogs should run on any architecture that runs Perl 5.
 
+    Two sample configuration files are included in this distribution
+    in the 'conf' subdirectory. Two man pages will be installed when
+    you install savelogs: savelogs(1) and rotation(1). Use them! ;o)
+
 INSTALLATION
     perl Makefile.PL
     make

@@ -3,27 +3,24 @@ BEGIN { $| = 1; plan(tests => 39); chdir 't' if -d 't'; }
 require 'savelogs.pl';
 
 use vars qw(
-	    $bindir
 	    $result
 	    $settings
 	    $home
 	    $bin
 	   );
 
-## setup bindir
-$bindir = '..';
 $home   = ( $< ? (getpwuid($<))[7] : '/' );
 $home .= ( $home =~ m!/$! ? '' : '/' );
 
 ## version
-$settings{'version'} = `egrep '^.VERSION ' $bindir/savelogs`;
+$settings{'version'} = `egrep '^.VERSION ' $savelogs`;
 chomp $settings{'version'}; $settings{'version'} =~ s/^.+'(.+?)'.*$/$1/;
-chomp($result = `$bindir/savelogs --version 2>&1`);
+chomp($result = `$savelogs --version 2>&1`);
 $result =~ s/^.+ version (.+?) \(.+$/$1/;
 ok( $settings{'version'}, $result );
 
 ## fetch default settings
-$settings = settings(`$bindir/savelogs --settings 2>&1`);
+$settings = settings(`$savelogs --settings 2>&1`);
 
 ## test default values (compatibility errors)
 ok( $settings->{'apacheconf'}, 	     'undef' );

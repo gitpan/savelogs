@@ -5,7 +5,6 @@ require 'savelogs.pl';
 use POSIX ();
 
 use vars qw(
-	    $bindir
             $tar
 	    $log1
             $date_ext
@@ -14,8 +13,7 @@ use vars qw(
             %contents
 	   );
 
-## setup bindir
-$bindir = '..';
+## setup
 $tar    = `which gtar 2>/dev/null`; chomp $tar;
 unless( $tar ) {
     $tar = `which tar 2>/dev/null`; chomp $tar;
@@ -33,7 +31,7 @@ system( 'mkdir', '-p', 'var/log' );
 $log1 = make_log(1024, 'var/log/messages');
 
 ## run
-system( "$bindir/savelogs --home=. --config=/conf/savelogs-1a.conf" );
+system( "$savelogs --home=. --config=/conf/savelogs-1a.conf" );
 
 ## check
 ok( -f "var/log/messages.$date_ext.gz" );
@@ -53,7 +51,7 @@ system( 'mkdir', '-p', 'var/log' );
 $log1 = make_log(1024, 'var/log/messages');
 
 ## run
-system( "$bindir/savelogs --home=. --config=/conf/savelogs-1b.conf" );
+system( "$savelogs --home=. --config=/conf/savelogs-1b.conf" );
 
 ## check
 ok( -f "var/log/messages.$date_exty.gz" );
@@ -73,7 +71,7 @@ system( 'mkdir', '-p', 'var/log' );
 $log1 = make_log(1024, 'var/log/messages');
 
 ## run
-system( "$bindir/savelogs --home=. --config=/conf/savelogs-1c.conf" );
+system( "$savelogs --home=. --config=/conf/savelogs-1c.conf" );
 
 ## check
 ok( -f "var/log/messages.$date_extc.gz" );
@@ -91,7 +89,7 @@ system( 'mkdir', '-p', 'var/log' );
 $log1 = make_log(1024, 'var/log/messages');
 
 ## run
-system( "$bindir/savelogs --home=. --config=/conf/savelogs-1d.conf" );
+system( "$savelogs --home=. --config=/conf/savelogs-1d.conf" );
 
 ## check
 ok( -f "var/log/messages.tar.gz" );
@@ -116,7 +114,7 @@ system( 'mkdir', '-p', 'var/log' );
 $log1 = make_log(1024, 'var/log/messages');
 
 ## run
-system( "$bindir/savelogs --home=. --config=/conf/savelogs-1e.conf" );
+system( "$savelogs --home=. --config=/conf/savelogs-1e.conf" );
 
 ## check
 ok( -f "var/log/messages.0.gz" );
@@ -140,7 +138,7 @@ system( 'mkdir', '-p', 'var/mail' );
 $log1 = make_log(1024, 'var/mail/cron');
 
 ## run
-system( "$bindir/savelogs --home=. --config=/conf/savelogs-2a.conf" );
+system( "$savelogs --home=. --config=/conf/savelogs-2a.conf" );
 
 ## check
 ok( -f "var/log/messages.$date_ext.gz" );
@@ -174,7 +172,7 @@ system( 'mkdir', '-p', 'var/mail' );
 $log1 = make_log(1024, 'var/mail/cron');
 
 ## run
-system( "$bindir/savelogs --home=. --config=/conf/savelogs-2b.conf" );
+system( "$savelogs --home=. --config=/conf/savelogs-2b.conf" );
 
 ## check
 ok( -f "var/log/logs.tar.gz" );
@@ -212,7 +210,7 @@ system( 'mkdir', '-p', 'var/mail' );
 $log1 = make_log(1024, 'var/mail/cron');
 
 ## run
-system( "$bindir/savelogs --home=. --config=/conf/savelogs-2c.conf" );
+system( "$savelogs --home=. --config=/conf/savelogs-2c.conf" );
 
 ## check
 ok( -f "var/log/logs.tar.gz" );
@@ -254,7 +252,7 @@ system( 'mkdir', '-p', 'var/mail' );
 $log1 = make_log(1024, 'var/mail/cron');
 
 ## run
-system( "$bindir/savelogs --home=. --config=/conf/savelogs-2d.conf" );
+system( "$savelogs --home=. --config=/conf/savelogs-2d.conf" );
 
 ## check
 ok( -f "var/log/logs.tar.gz" );
@@ -306,7 +304,7 @@ $log1 = make_log(1024, 'www/logs/access_log-domain.name3');
 $log1 = make_log(1024, 'www/logs/error_log-domain.name3');
 
 ## run
-system( "$bindir/savelogs --home=. --config=/conf/savelogs-3a.conf" );
+system( "$savelogs --home=. --config=/conf/savelogs-3a.conf" );
 
 ## check
 ok( -f "usr/local/etc/httpd/logs/access_log-domain.name1.$date_ext.gz" );
@@ -345,7 +343,7 @@ $log1 = make_log(1024, 'www/logs/access_log-domain.name3');
 $log1 = make_log(1024, 'www/logs/error_log-domain.name3');
 
 ## run
-system( "$bindir/savelogs --home=. --config=/conf/savelogs-3b.conf" );
+system( "$savelogs --home=. --config=/conf/savelogs-3b.conf" );
 
 ## check
 ok( -f "usr/local/etc/httpd/logs/access_log-domain.name1.$date_ext.gz" );

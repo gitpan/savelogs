@@ -3,11 +3,10 @@ FAQ
 MANIFEST
 Makefile.PL
 README
-Upgrading
+script/savelogs
 conf/savelogs.conf.lint
 conf/savelogs.conf.sample
 pods/rotation.pod
-savelogs
 t/0_defaults.t
 t/1_settings.t
 t/2_move.t

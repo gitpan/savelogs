@@ -3,12 +3,8 @@ BEGIN { $| = 1; plan(tests => 5); chdir 't' if -d 't'; }
 require 'savelogs.pl';
 
 use vars qw(
-	    $bindir
 	    $result
 	   );
-
-## setup bindir
-$bindir = '..';
 
 ## test all of the known cases that writes to STDERR
 

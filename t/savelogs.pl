@@ -1,3 +1,6 @@
+use vars qw($savelogs);
+$savelogs = '../script/savelogs';
+
 sub settings {
     my @settings = @_;
     my %settings;
