@@ -1,0 +1,74 @@
+=pod
+
+=head1 NAME
+
+B<savelogs> Frequently Asked Questions
+
+=head1 SYNOPSIS
+
+A collection of frequently asked questions about B<savelogs>.
+
+* THIS DOCUMENT IS NOT COMPLETE NOR DOES IT CONTAIN MUCH VALUE AT ALL.
+PLEASE READ THE MAN PAGE FOR SAVELOGS FOR REAL ANSWERS. THIS DOCUMENT
+IS CURRENTLY JUST A PLACEHOLDER FOR A FUTURE FAQ *
+
+=head1 DESCRIPTION
+
+Q. I don't understand the process phases (move, archive, etc.). What's
+   really going on here?
+
+A. read the manual.
+
+Q. Can I archive just one log file on a regular basis?
+
+A. Sure. You have read the man page, right? You need to decide what
+   "archive" means for you. Some people think archive means to rename
+   the file and then compress it. Other people think it just means to
+   rename the file, etc.
+
+Q. How does savelogs behave with very low disk space?
+
+A. Savelogs uses tar to archive log files and gzip to compress them.
+   If you're adding logs to an archive and then compressing that
+   archive, you must be able to guarantee this much disk space:
+
+       - size of current log * 2
+       - size of archive uncompressed
+
+   If this is more space than you have, consider using the 'period'
+   option, which will compress a certain quantity (which you specify
+   with the 'count' option) of individual logs. While this does not
+   save as much total disk space (tar files compress slightly better
+   than individual logs because of the added redundancy of multiple
+   logs in one file), it does reduce the free disk space required to
+   save the log files because you don't have to decompress the tar
+   file before adding the log file to it.
+
+   You may also add the 'count' option which will limit the number of
+   logs saved. By also specifying the 'size' option and running
+   savelogs more frequently, you can get a good idea how much total
+   disk space you will need for all of your logs.
+
+   To calculate how much log space you'll need, you can also set the
+   'size' limit so that logs only get archived if they are a minimum
+   size. This way you can know that the log size will be within a
+   certain range (you can run savelogs several times a day to get
+   finer control over the log size). Multiply that size plus that log
+   compressed (roughly 10:1) times the number of logs. For example:
+   
+       savelogs --size=500 --count=5 --period --conf=/etc/savelogs.conf
+   
+    will yield:
+   
+    500K (approx)    log
+     50K             log.0.gz
+     50K             log.1.gz
+     50K             log.2.gz
+     50K             log.3.gz
+     50K             log.4.gz
+    ===========================
+    750K             total logs
+   
+    You now need roughly only 750K for your logs. Then if you limit
+    your user quotas, you can guarantee you never run out of space
+    for any reason (barring core dumps and other unforseeable acts).

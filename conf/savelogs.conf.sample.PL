@@ -1,0 +1,128 @@
+#!perl
+use File::Basename qw(basename dirname);
+use Cwd;
+
+$origdir = cwd;
+chdir dirname($0);
+$file = basename($0, '.PL');
+
+open OUT, ">$file" or die "Can't create $file: $!\n";
+
+print "Extracting $file...\n";
+
+print OUT <<"!SAMPLE!CONFIG!FILE!";
+## This is a sample savelogs.conf which should be suitable for most
+## uses on the VPS
+##
+## $Id: savelogs.conf.sample.PL,v 1.3 2001/09/06 20:43:18 scottw Exp $
+##
+## Settings in this file generally have been set to their
+## corresponding savelogs internal defaults
+##
+## In order for savelogs to use this configuratino file, you must
+## specify it with the --config option on the command-line:
+##
+##    % savelogs --config=/etc/savelogs.conf
+##
+## All of these configuration options may be overridden on the
+## command-line when you execute savelogs. Please see savelogs(1) for
+## more information on setting configuration directives.
+##
+## Savelogs treats all log paths as relative to your home directory.
+## For example, if your home directory is really '/usr/home/joe' and
+## you specified 'savelogs /var/log/messages', savelogs will look in
+## ~/var/log/messages for the file instead. This is a feature.
+## 
+## Absolute paths are used in the PostMoveHook and Filter commands.
+##
+## Please read the man page savelogs(1).
+##
+
+## where to look when something goes wrong. This path is relative to
+## your home directory.
+LogFile                 /var/log/savelogs.log
+
+## how verbose to be in the LogFile (set this between 0 and 5
+## inclusive, 5 being most verbose).
+LogLevel                1
+
+## how big before we process a log? If you want to archive logs daily
+## regardless of their size, comment out this directive
+#Size                    500
+
+## create a new zero-length log file after moving each log?
+Touch                    no
+
+## rotate logs based on a period (i.e., how often you run savelogs)
+## If you use the 'Period' option, you should also use 'Count' and
+## the 'move' and 'compress' options for the 'Process' directive.
+## You may also specify a number such as '10' to enable this. If you
+## specify a value here, it will override the 'Count' variable.
+#Period                  10
+Period                  no
+
+## how many logs to save when doing periodic log rotations. If no
+## value is specified, a default of 10 is used. If a numeric value is
+## specified for 'Period', that will be used regardless of the value
+## associated with 'Count'.
+#Count                   10
+
+## add an extra character to the extension when moving files. If you
+## rotate your logs more than once a day, set this to 'yes' (or
+## 'true', or 'on', or 'yup').
+Hourly                  no
+
+## command to execute after moving log files. Another popular command is:
+##
+## kill -1 `ps -x | egrep 'Master:.+? \(https?d\)' | grep -v 'grep' | awk '{print $1}'`
+##
+## but we're not sure what this does ;o)
+PostMoveHook            /usr/local/bin/restart_apache
+
+## skip log files found in httpd.conf that match these patterns. Add
+## additional ApacheLogExclude directives if you wish, one per line.
+## The second exclude line will cause savelogs to skip log files that
+## start with 'vhosts/joe'. The third line will cause savelogs to skip
+## log files with the string 'error' anywhere in the log file name
+ApacheLogExclude        ^/dev/null$
+#ApacheLogExclude        ^vhosts/joe
+#ApacheLogExclude        error
+
+## where to find our log files. This path is relative to your home
+## directory. Uncomment this if you want savelogs to find your logs
+## for you
+#ApacheConf              /usr/local/etc/httpd/conf/httpd.conf
+
+## what to look for in httpd.conf as a log file. This directive
+## doesn't apply unless ApacheConf is specified
+ApacheLog               TransferLog|ErrorLog|AgentLog|RefererLog|CustomLog
+
+## clobber already compressed files (if this is not specified and
+## savelogs is not run interactively, savelogs may not complete log
+## processing)
+Clobber                 1
+
+## filter out lines with the string '/images/' in them. '$LOG' is a
+## special variable that savelogs knows about which refers to the log
+## file currently being processed.
+#Filter                  egrep -v '/images/' $LOG
+
+## store logs with full path information? If this is set to 'yes',
+## logs will be archived with their full path information.
+Full-Path               no
+
+## which savelogs phases to process. See savelogs(1) for details.
+## if you use the 'Period' option, 'move,compress' is assumed
+## regardless of what you specifiy here (unless 'filter' is detected,
+## in which case it will be 'move,filter,compress').
+#Process                 all
+
+## specify any logs you wish to process here or on the command line:
+#Log                     /var/log/messages
+#Log                     /var/log/proftpd
+#Log                     /var/log/ace
+!SAMPLE!CONFIG!FILE!
+
+close OUT or die "Can't close $file: $!\n";
+chmod 0644, $file or die "Can't set file permissions for $file: $!\n";
+chdir $origdir;

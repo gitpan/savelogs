@@ -1,0 +1,26 @@
+#!/usr/local/bin/perl -w
+use strict;
+
+## make a log file for testing
+use Getopt::Std;
+use vars qw($opt_r);
+getopts('r');
+
+my $size   = shift @ARGV || 1;
+my $file   = shift @ARGV || 'test_log';
+
+open FILE, ">$file"
+  or die "Could not open $file: $!\n";
+
+unless( $opt_r ) {
+    print FILE 'x' x $size;
+}
+
+else {
+    for( 1 .. $size ) {
+	print FILE chr(rand(255));
+    }
+}
+close FILE;
+
+exit;

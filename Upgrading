@@ -1,0 +1,39 @@
+1.19
+
+It is no longer necessary to use the --process=move,compress under
+the --period option. If the --period option (or its configuration file
+equivalent) is specified, the process options 'move,compress' are
+automatically assumed. If you have specified a process option of
+'filter', that will be honored also.
+
+1.21
+
+'move,compress' is now the default process option (not
+move,filter,archive,compress,delete)
+
+The period option takes an optional numeric argument as the count
+argument. The count argument still works for backward compatibility
+and some possible future directive dealing with tar files.
+
+1.24
+
+The default log level is now 0 (or totally silent) except in the
+presence of errors.
+
+1.25
+
+Implicit process option 'filter' when filter option is given (i.e.,
+you don't need to say '--process=filter').
+
+1.26
+
+Postmovehook output is captured internally and fed to LogFile (default=STDOUT).
+
+1.27
+
+Implicit process option 'archive' when archive option is given.
+
+
+1.28
+
+New directive 'StemHook' added.

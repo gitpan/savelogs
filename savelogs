@@ -1,0 +1,3192 @@
+#!/usr/local/bin/perl -w
+use strict;
+
+## Scott Wiersdorf
+## Created: Fri May 18 12:41:29 MDT 2001
+## $Id: savelogs,v 1.15 2001/10/02 22:42:47 scottw Exp $
+
+## savelogs
+
+use File::Basename;
+use Cwd qw( abs_path );
+use File::Copy;
+use vars qw($VERSION $BUILD);
+
+my $prognam = $0;
+$prognam    =~ s!^.*/([^/]+)$!$1!;
+$VERSION    = '1.28';
+$BUILD      = sprintf("%d/%02d/%02d", q$Date: 2001/10/02 22:42:47 $ =~ 
+		      m!(\d{1,4})/(\d{1,2})/(\d{1,2})!);
+
+## logging levels; debugging levels are for displaying data values
+## during execution
+use constant LEVEL0  => 0;    ## no output except fatal errors
+use constant LEVEL1  => 1;    ## LEVEL0 + start/finish stats, errors
+use constant LEVEL2  => 2;    ## LEVEL1 + warnings, logfiles to process
+use constant LEVEL3  => 3;    ## LEVEL2 + chdir, filter, phase completion
+use constant LEVEL4  => 4;    ## LEVEL3 + phase core actions, phase beginning
+use constant LEVEL5  => 5;    ## LEVEL4 + everything else
+
+use constant DEF_COUNT => 10; ## default count level
+
+my @logs = ();          ## the list of logs we're processing this session
+
+my $WHICH      = find_which() || 'which'; ## this must occur before find_binary
+
+## starting log sequence number
+my $SEQ_NO     = 0;
+my $SEP        = '.';
+my $EXT        = date_str('today');
+my $TAR        = find_binary('gtar', 'tar');
+my $ZIP        = find_binary('gzip', 'compress');
+my $GZIP       = find_binary('gzip');
+my $COMPRESS   = find_binary('compress');
+my $UNCOMPRESS = find_binary('uncompress');
+
+## -- set configuration defaults -- ##
+## new options MUST be all lowercase
+my %config = (
+	      ## general options
+	      'help'     	 => undef,
+	      'version'  	 => undef,
+	      'debug'    	 => LEVEL0,
+	      'dry-run'       	 => undef,
+	      'home'     	 => ($< ? (getpwuid($<))[7] : '/' ),
+	      'config'   	 => undef,
+	      'process'       	 => 'move,compress',
+
+	      ## logging options
+	      'loglevel' 	 => LEVEL0,
+	      'logfile'  	 => 'stdout',
+
+	      ## finding logs
+	      'apacheconf'       => undef,
+	      'apachelog'        => 'TransferLog|ErrorLog|AgentLog|RefererLog|CustomLog',
+	      'apachelogexclude' => [ qw(^/dev/null$ \|) ],
+	      'log'              => [],
+
+	      ## moving logs
+	      'size'             => undef,
+	      'sep'           	 => '.',
+	      'ext'           	 => undef,
+	      'hourly'        	 => undef,
+
+	      ## move hook
+	      'postmovehook'     => undef,
+	      'force-pmh'        => undef,
+
+	      ## stemming logs
+	      'stem'             => 'today',
+	      'stemhook'         => undef,
+	      'stemlink'         => 'symbolic',
+
+	      ## filters
+	      'filter'           => undef,
+
+	      ## archiving and compressing
+	      'gtar'             => undef,
+	      'tar'      	 => undef,
+	      'archive'       	 => undef,
+	      'full-path' 	 => undef,
+
+	      'touch'            => undef,
+	      'count'            => DEF_COUNT,
+	      'period'           => undef,
+
+	      'gzip'             => undef,
+	      'compress'         => undef,
+	      'uncompress'       => undef,
+	      'clobber'  	 => 1,
+	     );
+
+## -- fetch command-line options -- ##
+use Getopt::Long;
+my %opt = ();
+unless( GetOptions(\%opt,
+		   'help|h',
+		   'version',
+		   'debug=i',
+		   'settings',
+		   'dry-run',
+		   'home=s',
+		   'config=s',
+		   'process=s',
+
+		   'loglevel=i',
+		   'logfile:s',
+
+                   'apacheconf=s',
+		   'apachelog=s',
+		   'apachelogexclude:s',
+		   \@{$opt{'apachelogexclude'}},
+		   'log:s',
+		   \@{$opt{'log'}},
+
+		   'size:i',
+		   'sep:s',
+		   'ext:s',
+		   'hourly!',
+		   'postmovehook=s',
+		   'force-pmh',
+
+		   'stem:s',
+		   'stemhook=s',
+		   'stemlink=s',
+
+		   'filter=s',
+
+		   'gtar=s',
+		   'tar=s',
+		   'archive=s',
+		   'full-path',
+
+		   'touch!',
+		   'count=i',
+		   'period:i',
+
+		   'gzip=s',
+		   'compress=s',
+		   'uncompress=s',
+		   'clobber!',
+		  ) ) {
+    usage();
+}
+
+## -- check for version -- ##
+if( $opt{'version'} ) {
+    die <<_VERSION_;    ## diversion?
+This is $prognam version $VERSION ($BUILD)
+_VERSION_
+}
+
+## -- check for usage -- ##
+usage() if $opt{'help'};
+
+## -- parse configuration file and set defaults from it -- ##
+if( $opt{'config'} ) {
+    ## solve chicken/egg problem
+    if( $opt{'debug'} ) {
+	$config{'debug'} = $opt{'debug'};
+    }
+
+    $opt{'home'} = ( $opt{'home'} ? $opt{'home'} : $config{'home'} );
+
+    ## we need these clean NOW
+    clean_home( $opt{'home'} );
+    clean_path( $opt{'config'} );
+
+    my $config = $opt{'home'} . $opt{'config'};
+    debug( LEVEL1, "CONF: Config file option specified. Checking for '$config'" );
+
+    ## parse config file
+    debug( LEVEL1, "CONF: Config file '$config' found. Parsing..." );
+    parse_config($config, \%config);
+    debug( LEVEL1, "CONF: Config file parsing complete." );
+}
+
+## -- parse command-line options and set defaults from it -- ##
+parse_command_line( \%config );
+
+## -- cleanup paths -- ##
+clean_home( $config{'home'} );
+clean_path( $config{'logfile'}, 
+	    $config{'archive'}, 
+	    $config{'config'},
+	    $config{'apacheconf'} );
+
+## assign the value of period to count; this would be nice to put in
+## the post-processing section below but we have to guarantee that
+## this assignment occurs before we iterate over %config
+if( $config{'period'} ) {
+    $config{'count'} = $config{'period'};
+}
+
+## -- configuration settings all done. Insert any post processing here. -- ##
+for my $key ( sort keys %config ) {
+
+    my $value = $config{$key};
+
+    unless( defined $value ) {
+	$value = 'undef';
+    }
+
+    ## if the filter option is specified, add the filter process option
+    if( $key eq 'filter' && defined $config{$key} ) {
+	my @opts = split(',', $config{'process'});
+
+	## check for 'none' or an empty process option: assign filter
+	if( lc($config{'process'}) eq 'none' || 
+	    scalar(@opts) == 0 ) {
+	    @opts = qw(filter);
+	}
+
+	## check for 'filter' or 'all': leave this alone
+	elsif( $config{'process'} =~ /\bfilter\b/i ||
+	       $config{'process'} =~ /\ball\b/i ) {
+	    ; # do nothing
+	}
+
+	## check for 'move' process option: save 'move' and unshift filter
+	elsif( $config{'process'} =~ /\bmove\b/i ) {
+	    my $tmp = shift @opts;
+	    unshift @opts, 'filter';
+	    unshift @opts, $tmp;	      
+	}
+
+	## no 'move' found: tack 'filter' to the front of the options
+	else {
+	    unshift @opts, 'filter';
+	}
+
+	## rebuild process options
+	$config{'process'} = join(',', @opts);
+    }
+
+    ## if the period option is given, force 'move,compress' process
+    ## options
+    elsif( $key eq 'period' && defined $config{$key} ) {
+	if( $config{'process'} =~ /\bfilter\b/i ) {
+	    $config{'process'} = 'move,filter,compress';
+	}
+
+	else {
+	    $config{'process'} = 'move,compress';
+	}
+	$value = $config{$key};
+    }
+
+    ## if the archive option is given, add the archive process option
+    elsif( $key eq 'archive' && defined $config{$key} ) {
+	my @opts = split(',', $config{'process'});
+
+	## check for 'none' or empty process option: assign archive
+	if( lc($config{'process'}) eq 'none' ||
+	    scalar(@opts) == 0 ) {
+	    @opts = qw(archive);
+	}
+
+	## check for 'archive' or 'all': leave this alone
+	elsif( $config{'process'} =~ /\barchive\b/i ||
+	       $config{'process'} =~ /\ball\b/i ) {
+	    ; # do nothing
+	}
+
+	## check for 'move' and 'filter': save options and unshift archive
+	elsif( $config{'process'} =~ /\bmove\b/i ||
+	       $config{'process'} =~ /\bfilter\b/i ) {
+
+	    ## save either move or filter
+	    my @tmp = ();
+	    push @tmp, shift @opts;
+
+	    ## check for filter
+	    if( join(',', @opts) =~ /\bfilter\b/i ) {
+		push @tmp, shift @opts;
+	    }
+
+	    ## add archive
+	    unshift @opts, 'archive';
+
+	    ## restore any move and filter options
+	    unshift @opts, @tmp;
+	}
+
+	## no 'move' or 'filter' found: tack 'archive' to the front of the options
+	else {
+	    unshift @opts, 'archive';
+	}
+
+	## rebuild process options
+	$config{'process'} = join(',', @opts);
+    }
+
+    ## fixup size from kb to bytes
+    elsif( $key eq 'size' && $config{$key} ) {
+	$value = $config{$key} *= 1024;
+    }
+
+    ## fixup count; quietly decrement it to DWIM
+    elsif( $key eq 'count' && defined $config{$key} ) {
+	## decrement $config{$key} to no lower than zero. Zero always
+	## keeps one log.
+	$config{$key} = ( $config{$key} > 0 ? $config{$key} - 1 : 0 );
+	$value = $config{$key};
+    }
+
+    ## settings specified
+    if( $opt{'settings'} ) {
+	if( ref $value eq 'ARRAY' ) {
+	    printf( "SET: %-18s =>    ( ", $key );
+	    my $values = join( ', ', @$value );
+	    print "$values )\n";
+	}
+
+	else {
+	    printf( "SET: %-18s =>    %s\n", $key, $value );
+	}
+    }
+}
+
+## settings kills us
+if( $opt{'settings'} ) {
+    exit 0;
+}
+
+## -- open our log. After this point we may begin to issue write_log
+##    statements -- ##
+open_log();
+write_log( LEVEL1, "Savelogs begins." );
+
+## -- set defaults -- ##
+DEFAULTS: 
+{
+    ## find which which
+    debug( LEVEL1, "DEF: Using '$WHICH' for which" );
+
+    ## set the separator
+    $SEP = ( defined $config{'sep'} ? $config{'sep'} : '.' );
+    debug( LEVEL1, "DEF: Separator set to '$SEP'" );
+
+    ## set the log file extension
+    $EXT = ( defined $config{'ext'} ? date_str($config{'ext'}) : date_str() );
+    if( $config{'hourly'} ) {
+	$EXT = sprintf( "%s%c", $EXT, (97+(localtime(time()))[2]) );
+    }
+    debug( LEVEL1, "DEF: Extension set to '$EXT'" );
+
+    ## set the tar binary we'd like to use
+    $TAR = find_binary('gtar','tar')
+      or do {
+	  write_log( LEVEL2, "Could not find a suitable archive binary (e.g., gtar)" );
+      };
+    debug( LEVEL1, "DEF: Using '$TAR' for archiving" );
+
+    ## set the gzip or compress binary we want to use
+    $ZIP = find_binary('gzip', 'compress')
+      or do {
+	  write_log( LEVEL2, "Could not find a suitable compression binary (e.g., gzip)" );
+      };
+    debug( LEVEL1, "DEF: Using '$ZIP' for file compression" );
+
+    ## set gzip binary
+    $GZIP = find_binary('gzip')
+      or do {
+	  write_log( LEVEL2, "Could not find a suitable gzip binary." );
+      };
+    debug( LEVEL1, "DEF: Using '$GZIP' for gzip binary" );
+
+    ## set compress binary
+    $COMPRESS = find_binary('compress')
+      or do {
+	  write_log( LEVEL2, "Could not find a suitable compress binary." );
+      };
+    debug( LEVEL1, "DEF: Using '$COMPRESS' for compress binary" );
+
+    ## find an uncompress binary
+    $UNCOMPRESS = find_binary('uncompress')
+      or do {
+	  write_log( LEVEL2, "Could not find a suitable 'uncompress' binary." );
+      };
+    debug( LEVEL1, "DEF: Using '$UNCOMPRESS' for uncompress binary" );
+}
+
+## -- chdir home -- ##
+chdir( $config{'home'} )
+  or do {
+      write_log( LEVEL0, "Fatal: Could not chdir to '" . $config{'home'} . "': $!\n" );
+      exit;
+  };
+
+write_log( LEVEL3, "Changed directory to '" . $config{'home'} . "'" );
+
+## -- fetch logs to process -- ##
+FETCH_LOGS:
+{
+    my $logs;           ## list reference of files
+    my %inodes = ();    ## uniqify log file list
+
+    ## check for apacheconf directive
+    if( $config{'apacheconf'} && -f $config{'apacheconf'} ) {
+	$logs = fetch_apache_logs( $config{'apacheconf'} );
+    }
+
+    ## fetch log directives
+    push @$logs, @{$config{'log'}};
+
+    ## now push any logs from the command-line
+    push @$logs, @ARGV;
+
+    ## make log entries (our own special internal data structure)
+    for my $log ( @$logs ) {
+	my $full_log = $config{'home'} . $log;
+	debug( LEVEL1, "FETCH_LOGS: Creating log entry for '$log'" );
+	my $inode = (lstat($full_log))[1]
+	  or do {
+	      debug( LEVEL1, "FETCH_LOGS: Skipping '$log': Could not stat inode." );
+	      next;
+	  };
+
+	## skip duplicates
+	if( $inodes{$inode}++ ) {
+	    write_log( LEVEL4, "Skipping duplicate log '$log'." );
+	    next;
+	}
+
+	## save this log with special path information
+	push @logs, make_log_entry($log);
+	write_log( LEVEL2, "Found log '" . 
+		   mkpath($logs[$#logs]->{'logpath'}, $logs[$#logs]->{'log'}) . "'" );
+    }
+}
+
+## -- make sure we have logs -- ##
+unless( scalar @logs ) {
+    my $err = <<_NEED_LOGS_;
+You must specify one or more log files to process via the 'apacheconf'
+directive, the 'log' directive, or on the command-line.
+_NEED_LOGS_
+  usage( $err );
+}
+
+#################################
+## -- main log process loop -- ##
+#################################
+
+## -- phase 0: culling logs -- ##
+CULL:
+{
+    write_log( LEVEL4, "Entering cull logs phase" );
+
+    for my $log ( @logs ) {
+	my $logfile = mkpath($log->{'logpath'}, $log->{'log'});
+	debug( LEVEL1, "P0: \$logfile = $logfile" );
+
+	## make sure we've got a log
+	unless( -f $logfile ) {
+	    write_log( LEVEL4, "Skipping '$logfile': file does not exist." );
+	    undef $log;
+	    next;
+	}
+
+	## consider size of log
+	if( $config{'size'} && -s $logfile < $config{'size'} ) {
+	    debug( LEVEL1, "P0: size of '$logfile': ", -s $logfile );
+	    write_log( LEVEL4, "Skipping '$logfile': log file is too small." );
+	    undef $log;
+	    next;
+	}
+    }
+
+    write_log( LEVEL3, "Exiting cull logs phase" );
+}
+
+## -- phase 1: move logs -- ##
+MOVE:
+{
+    if( $config{'process'} =~ /\ball\b/i ||
+	$config{'process'} =~ /\bmove\b/i ) {
+
+	write_log( LEVEL4, "Entering move logs phase" );
+
+	for my $log ( @logs ) {
+	    next unless $log;
+
+	    ## no period renaming (normal)
+	    unless( defined $config{'period'} ) {
+		my $src = mkpath($log->{'logpath'}, $log->{'log'});
+		my $dst = $src . $SEP . $EXT;
+
+		unless( do_rename( $src, $dst ) ) {
+		    undef $log;
+		    next;
+		}
+	    }
+
+	    ## do period renaming, if needed and able
+	    else {
+		$SEP = '.';
+		$EXT = '0';
+
+		## a small data structure about this log:
+		## logpath: path to log
+		## log:     name of log w/o path
+		## sep:     separator between log and extension
+		## ext:     extension
+		## comp:    compression extension
+		my %log_arg = ( 'logpath' => $log->{'logpath'}, 
+				'log'     => $log->{'log'},
+				'sep'     => $SEP, 
+				'src_ext' => undef,
+				'dst_ext' => $EXT,
+				'cmp_ext' => undef,
+			      );
+
+		## move the logs
+		unless( period_log( \%log_arg ) ) {
+		    undef $log;
+		    next;
+		}
+	    }
+
+	    ## update internal log information
+	    $log->{'archive'} = $log->{'newlog'} = $log->{'log'} . $SEP . $EXT;
+	    $log->{'archpath'} = $log->{'newlogpath'} = $log->{'logpath'};
+
+	    ## touch old log file if needed
+	    if( $config{'touch'} ) {
+
+		my $file = mkpath( $log->{'logpath'}, $log->{'log'} );
+		write_log( LEVEL4, "Touching '$file'" );
+		unless( $config{'dry-run'} ) {
+		    open( TOUCH, ">>$file" )
+		      or do {
+			  write_log( LEVEL2, "Could not touch '$file': $!\n" );
+			  next;
+		      };
+		    close TOUCH;
+		}
+		write_log( LEVEL5, "'$file' touched." );
+	    }
+	}
+
+	write_log( LEVEL3, "Exiting move logs phase" );
+    }
+}
+
+## -- post move logs hook -- ##
+POSTMOVEHOOK:
+{
+    ## skip hook unless needed
+    last POSTMOVEHOOK unless $config{'postmovehook'};
+
+    write_log( LEVEL4, "Entering post-move-hook phase" );
+
+    ## translate variables
+    $config{'postmovehook'} =~ s/\$APACHE_CONF/$config{'apacheconf'}/g;
+    $config{'postmovehook'} =~ s/\$HOME/$config{'home'}/g;
+
+    write_log( LEVEL4, "Executing: '" . $config{'postmovehook'} . "'" );
+
+    ## make sure we have some logs (otherwise we may run something
+    ## we didn't want to)
+    unless( scalar(@logs) || $config{'force-pmh'}) {
+	write_log( LEVEL2, "No logs to process. Skipping postmovehook phase" );
+	last POSTMOVEHOOK;
+    }
+
+    ## execute command (backticks here) and save the output
+    unless( $config{'dry-run'} ) {
+	my @command_output = `$config{'postmovehook'} 2>&1`;
+	write_log( LEVEL3, "postmovehook command returned non-zero status. Ignoring." )
+	  if $?;
+	write_log( LEVEL5, "Command output (CMD):" );
+	for my $command_line ( @command_output ) {
+	    write_log( LEVEL5, "CMD> $command_line" );
+	}
+	sleep 1;
+    }
+
+    write_log( LEVEL3, "Exiting post-move-hook phase" );
+}
+
+## -- phase 1.5: stem logs -- ##
+## we create a symlink with the same filename stem of the log
+STEM:
+{
+    last STEM unless $config{'stem'} && $config{'stemhook'};
+
+    write_log( LEVEL4, "Entering stem phase" );
+
+    ## dry-run?
+
+    ## make symbolic links
+    for my $log ( @logs ) {
+	next unless $log;
+
+	## determine link location and unlink it if it exists
+	my $link = mkpath( $log->{'newlogpath'}, $log->{'log'} . $SEP . $config{'stem'} );
+	unlink $link if -f $link && $config{'clobber'};
+
+	## make a hard link
+	if( $config{'stemlink'} =~ /^hard/i ) {
+	    my $logfile = mkpath( $log->{'newlogpath'}, $log->{'newlog'} );
+	    debug( LEVEL1, "P1.5: Linking $link -> $logfile" );
+	    unless( $config{'dry-run'} ) {
+		link( $logfile, $link )
+		  or do {
+		      write_log( LEVEL1, "Skipping: Could not link $logfile to $link: $!" );
+		      next;
+		  };
+	    }
+	}
+
+	## make a copy: expensive!
+	elsif( $config{'stemlink'} =~ /^copy/i ) {
+	    my $logfile = mkpath( $log->{'newlogpath'}, $log->{'newlog'} );
+	    debug( LEVEL1, "P1.5: copying $logfile to $link" );
+	    unless( $config{'dry-run'} ) {
+		copy( $logfile, $link )
+		  or do {
+		      write_log( LEVEL1, "Skipping: Could not copy $logfile to $link: $!" );
+		      next;
+		  };
+	    }
+	}
+
+	## make a symbolic link
+	else {
+	    my $logfile = $log->{'newlog'};
+	    debug( LEVEL1, "P1.5: Symlinking $link -> $logfile" );
+	    unless( $config{'dry-run'} ) {
+		symlink( $logfile, $link )
+		  or do {
+		      write_log( LEVEL1, "Skipping: Could not symlink $logfile to $link: $!" );
+		      next;
+		  };
+	    }
+	}
+    }
+
+  STEMHOOK:
+    {
+	write_log( LEVEL4, "Entering post-stem-hook phase" );
+
+	## translate variables
+	$config{'stemhook'} =~ s/\$APACHE_CONF/$config{'apacheconf'}/g;
+	$config{'stemhook'} =~ s/\$HOME/$config{'home'}/g;
+
+	write_log( LEVEL4, "Executing: '" . $config{'stemhook'} . "'" );
+
+	## make sure we have some logs (otherwise we may run something
+	## we didn't want to)
+	unless( scalar(@logs) ) {
+	    write_log( LEVEL2, "No logs to process. Skipping stemhook phase" );
+	    last STEMHOOK;
+	}
+
+	## execute command (backticks here) and save the output
+	unless( $config{'dry-run'} ) {
+	    my @command_output = `$config{'stemhook'} 2>&1`;
+	    write_log( LEVEL3, "stemhook command returned non-zero status. Ignoring." )
+	      if $?;
+	    write_log( LEVEL5, "Command output (CMD):" );
+	    for my $command_line ( @command_output ) {
+		write_log( LEVEL5, "CMD> $command_line" );
+	    }
+	    sleep 1;
+	}
+
+	write_log( LEVEL3, "Exiting post-stem-hook phase" );
+    }
+
+    ## remove the link
+    for my $log ( @logs ) {
+	next unless $log;
+
+	my $link = mkpath($log->{'newlogpath'}, $log->{'log'} . $SEP . $config{'stem'});
+
+	## unlink
+	debug( LEVEL1, "P1.5: Unlinking $link" );
+	unless( $config{'dry-run'} ) {
+	    unlink $link
+	      or do {
+		  write_log( LEVEL1, "Could not unlink '$link': $!\n" );
+		  next;
+	      };
+	}
+    }
+
+    write_log( LEVEL3, "Exiting stem phase" );
+}
+
+
+## -- phase 2: filter logs -- ##
+FILTER:
+{
+    if( $config{'process'} =~ /\ball\b/i ||
+	$config{'process'} =~ /\bfilter\b/i ) {
+
+	write_log( LEVEL4, "Entering filter phase" );
+
+	## check for a filter
+	unless( $config{'filter'} ) {
+	    write_log( LEVEL3, "No filter specified. Skipping." );
+	    last FILTER;
+	}
+
+	## pipe the log through the filter and save the output of the
+	## filter as the file itself
+	for my $log ( @logs ) {
+
+	    next unless $log;
+
+	    ## make sure we're home
+	    chdir( $config{'home'} )
+	      or do {
+		  write_log( LEVEL1, "Could not chdir to '" . $config{'home'} . "': $!\n" );
+		  next;  ## die?
+	      };
+
+	    ## set temp file
+	    my $tmp_file = mkpath($log->{'newlogpath'}, '.' . $log->{'newlog'} . $$);
+	    debug( LEVEL1, "P2: Setting \$tmp_file to '$tmp_file'" );
+
+	    ## clean up
+	    if( -e $tmp_file ) {
+		write_log( LEVEL4, "Unlinking temporary file '$tmp_file'" );
+		unlink $tmp_file
+		  or do {
+		      write_log( LEVEL2, "Couldn't unlink temp file '$tmp_file': $!\n" );
+		      next;
+		  };
+	    }
+
+	    ## filter that puppy
+	    my $filter = $config{'filter'};
+	    my $logfile = mkpath($log->{'newlogpath'}, $log->{'newlog'});
+	    $filter =~ s/\$LOG/$logfile/g;
+	    debug( LEVEL1, "P2: \$filter set to '$filter'" );
+	    
+	    write_log( LEVEL4, "Filtering '$logfile' through '$filter'" );
+	    unless( $config{'dry-run'} ) {
+
+		## open temp file
+		open TMP, ">$tmp_file"
+		  or do {
+		      write_log( LEVEL1, "Couldn't open temp file '$tmp_file': $!\n" );
+		      next;
+		  };
+
+		## open process
+		open( FILTER, "$filter|" )
+		  or do {
+		      write_log( LEVEL1, "Couldn't open filter '$filter': $!\n" );
+		      next;				 
+		  };
+
+		## filter it
+		while( <FILTER> ) {
+		    print TMP;
+		}
+
+		## close process
+		close FILTER;
+		close TMP;
+
+		## rename tmp file
+		write_log( LEVEL4, "Renaming filter output '$tmp_file' to '$logfile'" );
+		rename $tmp_file, $logfile
+		  or do {
+		      write_log( LEVEL1, "Couldn't rename '$tmp_file' to '$logfile': $!\n" );
+		      next;
+		  };
+	    }
+	    write_log( LEVEL5, "Filtering '$logfile' via '$filter' complete." );
+	}
+
+	write_log( LEVEL4, "Exiting filter phase" );
+    }
+}
+
+## -- phase 3: archive logs -- ##
+ARCHIVE:
+{
+    if( $config{'process'} =~ /\ball\b/i ||
+	$config{'process'} =~ /\barchive\b/i ) {
+
+	write_log( LEVEL4, "Entering archive phase" );
+
+	## make sure we have a tar binary
+	unless( $TAR ) {
+	    write_log( LEVEL1, "No tar binary found. Skipping archive phase." );
+	    last ARCHIVE;
+	}
+
+	## each log gets its own archive, unless $config{'archive'}
+	## is specified. If $config{'archive'} is given without a
+	## pathname, then all files in a particular directory will
+	## get archived together under the $config{'archive'} name
+	## specified. If $config{'archive'} contains a path, all files
+	## in this session will be archived to it
+	for my $log ( @logs ) {
+	    my $logfile  = undef;
+	    my $archive  = undef;
+	    my $flags    = '-rf';
+
+	    next unless $log;
+
+	    ## make sure we're home
+	    chdir( $config{'home'} )
+	      or do {
+		  write_log( "Fatal: Could not chdir to '" . $config{'home'} . "': $!\n" );
+		  exit;
+	      };
+
+	    ## set archive names based on config. We fix this up here
+	    ## (versus in the move phase) in case the user skips the
+	    ## archive phase (this phase). Otherwise, the compression
+	    ## phase will get the wrong name.
+	    $log->{'archive'}    = ( $config{'archive'} 
+				     ? basename($config{'archive'})
+				     : $log->{'log'} . '.tar' );
+	    debug( LEVEL1, "P3: \$log->{'archive'} set to '" . $log->{'archive'} . "'" );
+
+	    ## if $config{'archive'} has path information, we take that
+	    ## path here, otherwise we use the original/moved log path
+	    if( $config{'archive'} && $config{'archive'} =~ m!/! ) {
+		$log->{'archpath'} = dirname($config{'archive'});
+		debug( LEVEL1, "P3: \$log->{'archpath'} set to '" . $log->{'archpath'} . "'" );
+		$archive = abs_path( $config{'home'} . $log->{'archpath'} ) . '/';
+		debug( LEVEL1, "P3: \$archive set by user to '$archive'" );
+	    }
+
+	    ## create an full-path archive. We're already in our home
+	    ## directory from which the full path will be created
+	    if( $config{'full-path'} ) {
+		## because we're operating from this home directory, we
+		## need to have the full path to the file to be archive.
+		$logfile = mkpath($log->{'newlogpath'}, $log->{'newlog'});
+		debug( LEVEL1, "P3: \$logfile set to '$logfile'" );
+	    }
+
+	    ## create a relative-path archive. Chdir to the directory
+	    ## where the file is located so the path stored in the archive
+	    ## will be relative to this directory
+	    else {
+		chdir( $log->{'newlogpath'} )
+		  or do {
+		      write_log( LEVEL1, 
+				 "Could not chdir to '" . $log->{'newlogpath'} . "': $!\n" );
+		      next;
+		  };
+		debug( LEVEL1, "P3: chdir to '" . $log->{'newlogpath'} . "' successful" );
+
+		## set log name
+		$logfile = $log->{'newlog'};
+	    }
+
+	    ## the name of our humble archive we're writing to. If we're
+	    ## absolute, $archive already has the path information. If
+	    ## we're relative, $archive should be blank.
+	    $archive .= $log->{'archive'};
+	    debug( LEVEL1, "P3: Appending '" . $log->{'archive'} . 
+		   "' to \$archive => '$archive'" );
+
+	    ## if the humble archive exists, append to it
+	    if( -f $archive ) {
+		## default
+	    }
+
+	    ## maybe an already gzip'ed archive?
+	    elsif( -f "$archive.gz" ) {
+		## decompress and set the compress flag for next phase
+		## 
+		## we currently don't set the compress flag for next
+		## phase yet
+
+		## check gzip
+		if( $GZIP ) {
+		    write_log( LEVEL4, "Expanding '$archive.gz' with '$GZIP' before append...\n" );
+		    system( $GZIP, '-d', "$archive.gz" )
+		      and do {
+			  write_log( LEVEL1, "Error expanding '$archive.gz'. Skipping." );
+			  next;
+		      };
+		}
+
+		else {
+		    write_log( LEVEL1, "Too timid to expand '$archive.gz'. Skipping." );
+		    next;
+		}
+	    }
+
+	    ## maybe an already compressed archive?
+	    elsif( -f "$archive.Z" ) {
+		## decompress and set the compress flag for next phase
+		## 
+		## we currently don't set the compress flag for next
+		## phase yet
+
+		## check zip
+		if( $GZIP ) {
+		    write_log( LEVEL4, "Expanding '$archive.Z' with '$GZIP' before append...\n" );
+		    system( $GZIP, '-d', "$archive.Z" )
+		      and do {
+			  write_log( LEVEL1, "Error expanding '$archive.Z'. Skipping." );
+			  next;
+		      };
+		}
+
+		## try uncompress
+		elsif( $UNCOMPRESS ) {
+		    write_log( LEVEL4, "Uncompressing '$archive' with '$UNCOMPRESS' before append...\n" );
+		    system( $UNCOMPRESS, "$archive.Z" )
+		      and do {
+			  write_log( LEVEL1, "Error uncompressing '$archive.Z'. Skipping." );
+			  next;
+		      };
+		}
+
+		else {
+		    write_log( LEVEL1, "Too timid to expand '$archive.Z'. Skipping." );
+		    next;
+		}
+	    }
+
+	    ## a new archive
+	    else {
+		$flags = '-cf';
+	    }
+
+	    ## at this point we have a) no archive or b) an
+	    ## uncompressed archive. We need to see if the user
+	    ## specified 'count' and if $archive exists we need to
+	    ## make sure that adding a new file won't take us over
+	    ## quota. If it does take us over quota, we need to delete
+	    ## the oldest files (based on name). This implies that
+	    ## certain naming conventions must apply or bets are off.
+
+	    ## verify file count in this archive
+	  COUNT:
+	    {
+		## currently, a bug in GNU tar prevents --delete from
+		## working correctly with large tar files. We either
+		## need to work around it by re-creating the archive
+		## or upgrading tar
+		last COUNT;
+
+		if( $config{'count'} && -f $archive ) {
+		    write_log( LEVEL4, "Checking file count in $archive" );
+		    local $_ = "$TAR -tf $archive";
+		    my @cmd = split;
+
+		    open TAR, "@cmd|"
+		      or do {
+			  write_log( LEVEL1, "Error opening '$_': $! Skipping.\n" );
+			  next;
+		      };
+		    my @files = sort <TAR>;
+		    close TAR;
+		    chomp @files;
+
+		    ## if we have fewer than 'count', we're ok to add
+		    ## one more file below
+		    my $count_diff = scalar(@files) - $config{'count'};
+		    if( $count_diff < 0 ) {
+			last COUNT;
+		    }
+
+		    ## looks like we have too many files in this
+		    ## archive. We need to trim this archive by the
+		    ## number of files we're over plus one (to make
+		    ## room for the new file).
+		    $count_diff++;      ## trim this many files
+
+		    ## figure out which are the "oldest" files
+		    my $oldest = find_oldest( $count_diff, \@files );
+
+		    for my $file ( @$oldest ) {
+			debug( LEVEL1, "Scheduling '$file' for removal from '$archive'" );
+		    }
+
+		    ## delete these files from this archive
+		    if( scalar @$oldest ) {
+			unless( $config{'dry-run'} ) {
+			    system( $TAR, '--delete', '-f', $archive, @$oldest )
+			      or do {
+				  write_log( "Error deleting (@$oldest) from '$archive'. Skipping." );
+				  next;
+			      };
+			}
+		    }
+
+		    ## couldn't ascertain which files to remove.
+		    ## Archive the file anyway so we don't lose it.
+		    else {
+			## whatever
+			last COUNT;
+		    }
+		}
+	    }
+
+	    write_log( LEVEL4, "Appending '$logfile' to '$archive'." );
+	    unless( $config{'dry-run'} ) {
+		if( system( $TAR, $flags, $archive, $logfile ) ) {
+		    write_log( LEVEL1, "Error writing '$logfile' to '$archive'. Skipping." );
+		    next;
+		}
+	    }
+
+	    ## XXX: insert double-check code here: read tar contents,
+	    ## check integrity of tar file, etc.
+
+	    write_log( LEVEL5, "'$logfile' append to '$archive' complete" );
+
+	    ## save the archive name we really used
+	    $log->{'archive'} = basename($archive);
+	}
+
+	write_log( LEVEL3, "Exiting archive phase" );
+    }
+}
+
+## -- phase 4: compress archives -- ##
+COMPRESS:
+{
+    if( $config{'process'} =~ /\ball\b/i ||
+	$config{'process'} =~ /\bcompress\b/i ) {
+
+	write_log( LEVEL4, "Entering compress phase" );
+
+	## make sure we have a compression binary
+	unless( $ZIP ) {
+	    write_log( LEVEL1, "No compression binary found. Skipping compression phase." );
+	    last ARCHIVE;
+	}
+
+	## compress each archive we've created
+	for my $log ( @logs ) {
+	    my $archive  = undef;
+
+	    next unless $log;
+
+	    ## make sure we're home
+	    chdir( $config{'home'} )
+	      or do {
+		  write_log( LEVEL0, "Fatal: Could not chdir to '" . $config{'home'} . "': $!\n" );
+		  exit;
+	      };
+
+	    debug( LEVEL1, "P4: \$log->{'archive'} = '" . $log->{'archive'} . "'" );
+	    debug( LEVEL1, "P4: \$log->{'archpath'} set to '" . $log->{'archpath'} . "'" );
+
+	    ## see if we have user-specified archpath information
+	    if( $log->{'archpath'} ne $log->{'newlogpath'} ) {
+		$archive = abs_path(mkpath($config{'home'}, $log->{'archpath'})) . '/';
+		debug( LEVEL1, "P4: \$archive is set to '$archive'" );
+	    }
+
+	    ## create a relative-path archive
+	    else {
+		debug( LEVEL1, "P4: using relative paths" );
+		chdir( $log->{'newlogpath'} )
+		  or do {
+		      write_log( LEVEL1, 
+				 "Could not chdir to '" . $log->{'newlogpath'} . "': $!\n" );
+		      next;
+		  };
+		debug( LEVEL1, "P4: chdir to '" . $log->{'newlogpath'} . "' successful" );
+	    }
+
+	    ## the name of our humble archive we're writing to
+	    $archive .= $log->{'archive'};
+	    debug( LEVEL1, "P4: \$archive set to '$archive'" );
+
+	    ## make sure it's not already compressed. This isn't the best
+	    ## way (by filename extension) but since we're assuming we're
+	    ## the only ones who'll be horsing around with this file
+	    ## directly, we can feel somewhat comfortable with that.
+	    if( $archive =~ /\.(?:gz|Z)$/ ) {
+		write_log( LEVEL3, "Archive '$archive' already compressed. Skipping" );
+		next;
+	    }
+
+	    ## check for already compressed file from previous pass
+	    ## (we don't update $log->{'archive'} for each file so we
+	    ## need to check this to make sure)
+	    if( !-f $archive && (-f "$archive.Z" || -f "$archive.gz") ) {
+		write_log( LEVEL4, "$archive already compressed. Skipping." );
+		next;
+	    }
+
+	    ## make sure we've got an archive to play with
+	    unless( -f $archive ) {
+		write_log( LEVEL1, "Error: Archive '$archive' does not exist!. Skipping" );
+		next;
+	    }
+
+	    ## at this point we know we have an archive to compress:
+	    ## either a tar file or a plain log file
+	    my @cmd = ( $ZIP );
+	    push @cmd, '-f' if $config{'clobber'};
+	    push @cmd, $archive;
+
+	    write_log( LEVEL4, "Compressing '$archive'" );
+	    debug( LEVEL1, "P4: Compress command: '@cmd'" );
+	    unless( $config{'dry-run'} ) {
+		if( system( @cmd ) ) {
+		    write_log( LEVEL1, "Error compressing archive. Make sure archive is not already compressed and that '$archive' exists" );
+		    next;
+		}
+	    }
+	    write_log( LEVEL5, "'$archive' compression complete." );
+	}
+	write_log( LEVEL3, "Exiting compress phase" );
+    }
+}
+
+## -- phase 5: delete logs -- ##
+DELETE:
+{
+    if( $config{'process'} =~ /\ball\b/i ||
+	$config{'process'} =~ /\bdelete\b/i ) {
+
+	write_log( LEVEL4, "Entering delete phase" );
+
+	## delete each log or moved log
+	for my $log ( @logs ) {
+	    next unless $log;
+
+	    my $logfile = mkpath( $log->{'newlogpath'}, $log->{'newlog'} );
+	    debug( LEVEL1, "P5: \$logfile set to '$logfile'" );
+
+	    ## make sure we're home
+	    chdir( $config{'home'} )
+	      or do {
+		  write_log( LEVEL1, "Could not chdir to '" . $config{'home'} . "': $!\n" );
+		  next;  ## die?
+	      };
+
+	    write_log( LEVEL4, "Deleting '$logfile'" );
+	    unless( $config{'dry-run'} ) {
+		unlink $logfile
+		  or do {
+		      write_log( LEVEL1, "Could not delete '$logfile': $!\n" );
+		      next;
+		  };
+	    }
+	    write_log( LEVEL5, "'$logfile' deletion complete." );
+	}
+
+	write_log( LEVEL3, "Exiting delete phase" );
+    }
+}
+
+
+## -- close our log -- ##
+write_log( LEVEL1, "Savelogs ends." );
+close_log();
+
+exit;
+
+
+## make sure home directory has a trailing slash
+sub clean_home {
+    for my $file ( @_ ) {
+	next unless defined $file;
+	next unless -d $file;
+
+	## make it an absolute path
+	$file = abs_path($file);
+
+	## add trailing slash
+	$file .= '/' unless $file =~ m!/$!;
+
+	## untaint while we're at it
+	if( $file =~ m/^(.*)$/ ) {
+	    $file = $1;
+	}
+    }
+}
+
+## make sure paths have no leading slash
+sub clean_path {
+    for my $file ( @_ ) {
+	next unless defined $file;
+
+	debug( LEVEL1, "clean_path: \$file set to $file" );
+
+	## strip leading slash(es)
+	$file =~ s!^/!!g;
+
+	## untaint while we're at it
+	if( $file =~ m/^(.*)$/ ) {
+	    $file = $1;
+	}
+	debug( LEVEL1, "clean_path: \$file cleaned to $file" );
+    }
+}
+
+## write to STDOUT, unless 'logfile' or 'stderr' directives are given.
+sub open_log {
+
+  CONFIG:
+    {
+	## check for stdout
+	if( $config{'logfile'} =~ /^stdout$/i ) {
+	    open LOG, ">&STDOUT"
+	      or do {
+		  warn "Could not log to STDOUT: $!\n";
+		  warn "Trying STDERR instead.\n";
+		  $config{'logfile'} = 'stderr';
+		  redo CONFIG;
+	      };
+	}
+
+	## try stderr
+	elsif( $config{'logfile'} =~ /^stderr$/i ) {
+	    open LOG, ">&STDERR"
+	      or do {
+		  warn "Could not log to STDERR: $!\n";
+		  warn "Trying default for logging instead.\n";
+		  $config{'logfile'} = undef;
+		  redo CONFIG;
+	      };
+	}
+
+	## try a log file: home should have trailing slash -OR-
+	## logfile leading slash
+	elsif( $config{'logfile'} ) {
+	    my $log = $config{'home'} . $config{'logfile'};
+	    debug( LEVEL1, "open_log: log set to '$log'" );
+	    open LOG, ">>$log"
+	      or do {
+		  warn "Could not open '$log' for appending: $!\n";
+		  warn "Trying STDOUT for logging instead.\n";
+		  $config{'logfile'} = '';
+		  redo CONFIG;
+	      };
+	}
+
+	## try stdout as the failover
+	else {
+	    open LOG, ">&STDOUT"
+	      or do {
+		  warn "Could not log to STDOUT: $!\n";
+		  die "Quitting.\n";
+	      };
+	}
+    }
+
+    return 1;
+}
+
+sub write_log {
+    my $level = shift;
+    unless( defined($level) ) {
+	warn "No log level given. No logging done.\n";
+	return 0;
+    }
+    my @args = @_;
+
+    ## messages
+    unless( scalar @args ) {
+	warn "No log message given. No logging done.\n";
+	return 0;
+    };
+
+    ## why waste our time and yours?
+    return 1 if $level > $config{'loglevel'};
+
+    local $_;
+    my $date = scalar localtime;
+    for ( @args ) {
+	chomp;
+	print LOG "[$date] [$prognam] $_\n";
+    }
+
+    return 1;
+}
+
+sub close_log {
+    close LOG;
+    return 1;
+}
+
+sub parse_config {
+    my $config_file = shift;
+    my $config = shift;
+
+    open CONFIG, $config_file
+      or do {
+	  warn "Could not read config file '$config_file': $!\nSkipping config file.\n";
+	  return undef;
+      };
+
+    local $_;
+    while( <CONFIG> ) {
+	next if /^[#;]/;  	    ## skip comments
+	next if /^\s*$/;        ## skip empty lines
+
+	## some whitespace (optional), a directive, some
+	## whitespace, a value, some whitespace (optional)
+	unless( m/^\s*(\S+)\s+(.+)\s*$/ ) {
+	    debug( LEVEL1, "Skipping config file line: $_" );
+	    next;
+	}
+
+	my $directive = lc($1);
+	my $value     = $2;
+
+	## normalize boolean values
+	my $newval    = ( $value =~ /^(?:false|no|off|undef|nope|0)$/i
+			  ? 0
+			  : $value );
+	$newval       = ( $newval =~ /^(?:true|yes|on|defined|yup|1)$/i
+			  ? 1
+			  : $newval );
+	unless( exists $$config{$directive} ) {
+	    debug( LEVEL1, "Config file directive '$directive' unmatched. Skipping." );
+	    next;
+	}
+
+	## set directive
+	debug( LEVEL1, "Config: $directive => $newval" );
+	debug( LEVEL1, "Config: rewriting $directive directive '$value' => '$newval'" );
+
+	## if this directive is a repeatable directive, store this
+	## value in an array
+	if( 'ARRAY' eq ref $$config{$directive} ) {
+	    push @{$$config{$directive}}, $newval;
+	}
+
+	## otherwise, store the scalar
+	else {
+	    $$config{$directive} = $newval;
+	}
+    }
+
+    close CONFIG;
+
+    return 1;
+}
+
+## read in config file, if any; then override settings with
+## command-line options, if any
+sub parse_command_line {
+    my $config = shift;
+
+    ## now override config file options with command line options
+    for my $key ( map { lc($_) } keys %opt ) {
+	my $value = $opt{$key};
+	unless( exists $$config{$key} ) {
+	    debug( LEVEL1, "Command-line directive '$key' unmatched. Skipping." );
+	    next;
+	}
+
+	## set directive
+	my $print_value = $value;
+	if( 'ARRAY' eq ref $value ) {
+	    $print_value = join( ', ', @$value );
+	    next unless scalar @$value;
+	}
+
+	debug( LEVEL1, "Command: $key => '$print_value'" );
+	$$config{$key} = $value;
+    }
+
+    return 1;
+}
+
+sub fetch_apache_logs {
+    my $httpd_conf = shift;
+    local $_;
+    my @logs = ();
+    my $server_root;
+    my $apachelog_re        = $config{'apachelog'};
+    my $apachelogexclude_re = join( '|', @{$config{'apachelogexclude'}} );
+
+    ## make sure apachelog is set. This shouldn't be an issue because
+    ## we force command-line and config file to have a value for this
+    ## directive.
+    unless( $config{'apachelog'} ) {
+	write_log( LEVEL2, "No apachelog directive found. Skipping apache configuration file." );
+	return \@logs;
+    }
+
+    ## setup apache log regular expression
+    $apachelog_re = qr/$apachelog_re/;
+    debug( LEVEL1, "Log search pattern set to '$apachelog_re' " );
+
+    ## setup apache log exclude regular expression
+    if( $config{'apachelogexclude'} ) {
+	$apachelogexclude_re = qr/$apachelogexclude_re/;
+	debug( LEVEL1, "Exclude pattern set to '$apachelogexclude_re'" );
+    }
+
+    ## read apache configuration file
+    open HTTPD, $httpd_conf
+      or do {
+	  write_log( LEVEL0, "Fatal: Could not open $httpd_conf: $!\n" );
+	  exit;
+      };
+    while( <HTTPD> ) {
+	## skip comments
+	next if /^\#/;            ## escape needed for emacs happiness
+
+	## find server root
+	if( /^ServerRoot\s+(.+)$/i ) {
+	    $server_root = $1;
+	    next;
+	}
+
+	## skip non-log directives. We grab the first argument after
+	## the log directive because CustomLog takes multiple format
+	## arguments after the log name.
+	##
+	## We grab all the non-whitespace characters immediately after
+	## the log directive.
+	##
+	unless( /^\s*(?:$apachelog_re)\s+(\S+)/io ) {
+	    next;
+	}
+	my $log_entry = $1;
+
+	## skip excluded patterns
+	if( $config{'apachelogexclude'} ) {
+	    if( $log_entry =~ /$apachelogexclude_re/o ) {
+		write_log( LEVEL3, "Skipping '$log_entry': Exclude pattern match." );
+		next;
+	    }
+	}
+
+	## found a log entry
+	push @logs, $log_entry;
+	debug( LEVEL1, "Found '$log_entry' in '$httpd_conf'" );
+    }
+    close HTTPD;
+
+    ## make sure we found the server root
+    unless( $server_root ) {
+	write_log( LEVEL0, "Fatal: No server root found in $httpd_conf. Cannot proceed.\n" );
+	exit;
+    }
+
+    ## if the log name begins with a /, we don't prepend $server_root
+    my @full_logs = map { ( m!^/! ? $_ : $server_root . '/' . $_ ) } @logs;
+    return \@full_logs;
+}
+
+## takes a log file name and returns a log entry reference
+## we're careful to remove leading slashes from absolute pathnames in
+## this function so that we don't try to write somewhere we can't
+## later on
+sub make_log_entry {
+    my $log = shift;
+
+    my %entry = ();
+    $entry{'sequence'}   = ++$SEQ_NO;
+
+    ## set log paths (the name and location of the log)
+    $entry{'log'}        = basename($log);
+    $entry{'logpath'}    = dirname($log);
+    $entry{'logpath'}    =~ s!^/!!g;    ## remove leading slash(es)
+
+    ## set new log paths (what we name our log to)
+    $entry{'newlog'}     = $entry{'log'};
+    $entry{'newlogpath'} = $entry{'logpath'};
+
+    ## set archive paths (the name and location of the archive)
+    ## we set the $config{'archive'} in the archiving stage because
+    ## if the user specifies a $config{'archive'}, and we skip the
+    ## archive stage (because it wasn't specified, then we'll get an
+    ## error during the compression stage because of naming
+    ## differences.
+    $entry{'archive'}    = $entry{'log'};
+    $entry{'archpath'}   = $entry{'logpath'};
+
+    return \%entry;
+}
+
+sub date_str {
+    my $date = shift || 'today';
+    use constant DAY_SECS => 60 * 60 * 24;
+
+    ## today's date
+    if( $date eq 'today' ) {
+	$date = time();
+    }
+
+    ## yesterday's date
+    elsif( $date eq 'yesterday' ) {
+	$date = time() - DAY_SECS;
+    }
+
+    else {
+	return $date;
+    }
+
+    my @date = localtime($date)
+      or do {
+	  write_log( LEVEL0, "Fatal: Invalid date '$date' specified: $!\n" );
+	  exit;
+      };
+
+    return sprintf( "%02d%02d%02d", 
+		    ($date[5]-100), ($date[4]+1), ($date[3]) );
+}
+
+sub find_binary {
+    my @binaries = @_;
+    my $test;
+    my @test = ();
+
+    ## check for user specified binary
+    for my $binary ( @binaries ) {
+	if( defined $config{$binary} && -x $config{$binary} ) {
+	    return $config{$binary};
+	}
+    }
+
+    ## check for path
+    $WHICH = 'which' unless $WHICH;
+    for my $binary ( @binaries ) {
+	open CMD, "$WHICH $binary|"
+	  or do {
+	      write_log( LEVEL1, "Could not open pipe for '$binary': $!\n" );
+	      return undef;
+	  };
+	$test = <CMD>;
+	close CMD;
+
+	if( $test && length $test ) {
+	    chomp $test;
+	    return $test;
+	}
+    }
+
+    ## find our own
+    for my $binary ( @binaries ) {
+	@test = map { "$_/$binary" } qw( /bin /sbin /usr/bin /usr/sbin 
+					 /usr/local/bin /usr/local/sbin );
+
+	for $test ( @test ) {
+	    return $test if -x $test;
+	}
+    }
+
+    ## bummer
+    return undef;
+}
+
+sub find_which {
+    for my $path ( qw( /usr/local/bin/which /usr/bin/which /bin/which which ) ) {
+	return $path if -x $path;
+    }
+    return undef;
+}
+
+## this is a recursive function. It is bounded by $config{'count'}
+## (which the user may set to be very high, unfortunately).
+sub period_log {
+    my $log_arg = shift;
+    my %log = %$log_arg;
+
+    ## setup source file
+    my $src = mkpath($log{'logpath'}, $log{'log'}) .
+      ( defined $log{'src_ext'} ? $log{'sep'} . $log{'src_ext'} : '' ) . 
+	( defined $log{'cmp_ext'} ? $log{'sep'} . $log{'cmp_ext'} : '' );
+
+    ## setup destination file
+    my $dst = mkpath($log{'logpath'}, $log{'log'}) .
+      ( defined $log{'dst_ext'} ? $log{'sep'} . $log{'dst_ext'} : '' ) . 
+	( defined $log{'cmp_ext'} ? $log{'sep'} . $log{'cmp_ext'} : '' );
+
+  RENAME:
+    {
+
+	## $dst exists as a plain log
+	if( -f $dst ) {
+	    if( $log{'dst_ext'} == $config{'count'} ) {
+		return do_rename( $src, $dst );
+	    }
+
+	    $log{'src_ext'} = $log{'dst_ext'};
+	    $log{'dst_ext'}++;
+
+	    redo RENAME if period_log( \%log );
+	    return undef;
+	}
+
+	## $dst exists as a gzip'd log
+	elsif( -f "$dst.gz" ) {
+	    if( $log{'dst_ext'} == $config{'count'} ) {
+		return do_rename( $src, $dst );
+	    }
+
+	    $log{'src_ext'} = $log{'dst_ext'};
+	    $log{'dst_ext'}++;
+
+	    $log{'cmp_ext'} = 'gz';
+	    redo RENAME if period_log( \%log );
+	    return undef;
+	}
+
+	## $dst exists as a compress'd log
+	elsif( -f "$dst.Z" ) {
+	    if( $log{'dst_ext'} == $config{'count'} ) {
+		return do_rename( $src, $dst );
+	    }
+
+	    $log{'src_ext'} = $log{'dst_ext'};
+	    $log{'dst_ext'}++;
+
+	    $log{'cmp_ext'} = 'Z';
+	    redo RENAME if period_log( \%log );
+	    return undef;
+	}
+
+	## $dst does not exist in any known form
+	else {
+	    return do_rename( $src, $dst );
+	}
+    }
+}
+
+sub do_rename {
+    my $src = shift;
+    my $dst = shift;
+
+    ## make sure we have a source file
+    unless( -f $src ) {
+	write_log( LEVEL2, "Skipping '$src': file does not exist." );
+	return 0;
+    }
+
+    ## rename the log
+    write_log( LEVEL4, "Renaming '$src' to '$dst'..." );
+    unless( $config{'dry-run'} ) {
+	unless( rename $src, $dst ) {
+	    write_log( LEVEL1, "Error renaming '$src' to '$dst': $!\n" );
+	    write_log( LEVEL1, "Skipping '$src'" );
+	    return 0;
+	}
+    }
+
+    write_log( LEVEL5, "Rename '$src' to '$dst' complete" );
+    return 1;
+}
+
+sub do_period {
+    my $dir   = shift;
+    my $file  = shift;
+
+    my @files = ();
+
+    ## find files that look like ours
+    opendir DIR, $dir
+      or do {
+	  write_log( LEVEL0, "Could not open $dir to do period: $!\n" );
+	  return undef;
+      };
+
+    ## we assume (yep) that $SEP is a single character, though there's
+    ## no rule about that. In practice it can be zero or more
+    ## characters in length. We make sure it's a single character
+    ## before we invoke do_period, but in practice it may be anything
+    ## (if they're not doing period logging, for example).
+    ##                log   1-4 digits
+    ##                    SEP
+    @files = grep { /^$file.\d{1,4}/ } readdir DIR;
+    closedir DIR;
+
+    ## any matches
+    unless( scalar @files ) {
+	return 0;
+    }
+}
+
+## this is never called until we find a workaround for the GNU tar
+## delete bug (I guess we could rewrite the archive...too lazy).
+sub find_oldest {
+    my $files = shift;
+    my $count = $config{'count'} || DEF_COUNT;
+    my @backwards = ();
+
+    ## count the number of extensions that are pure digits
+    ## the weakness is, of course, an extension like this: foo.abc123
+    ## since only the 123 will get captured.
+    ## 
+    ## The suggestion is "Don't do that." Use numeric-only extensions
+    ## or extensions that do not end in numbers. We don't know the
+    ## separator (for all we know, the user has mixed separators) so
+    ## we have to go with a weaker regex.
+
+    my $digits = scalar( grep { defined( (/([\d]+)$/)[0] ) } @$files );
+
+    ## good, can do a <=> sort
+    if( $digits == scalar(@$files) ) {
+	@backwards = 
+	  map  { $_->[0] }
+	    sort { $a->[1] <=> $b->[1] }
+	      map  { [ $_, (/([\d]+)$/)[0] ] } @$files;
+    }
+
+    ## do a cmp sort
+    else {
+	@backwards = 
+	  map  { $_->[0] }
+	    sort { $a->[1] cmp $b->[1] }
+	      map  { [ $_, (/([\da-zA-Z]+)$/)[0] ] } @$files;
+    }
+
+    my $start = $#backwards - $count;
+    my @return = @backwards[0 .. ( $start > 0 ? $start : 0 )];
+    return \@return;
+}
+
+## makes a path from a basename and a filename
+sub mkpath {
+#    my $base = shift;
+#    my $file = shift;
+#    return $base . '/' . $file;
+    return join('/', @_);
+}
+
+## emits debug messages
+sub debug {
+    my $level = shift;
+    unless( defined($level) ) {
+	warn "No debug level given. No logging done.\n";
+	return 0;
+    }
+
+    ## check debug level
+    return 1 if $level =~ /^\d+$/ && $level > $config{'debug'};
+
+    local $_;
+    my @args = @_;
+    for ( @args ) {
+	chomp;
+	print STDERR "DEBUG [", $level, "] : $_\n";
+    }
+
+    return 1;
+}
+
+sub usage {
+    my $msg = shift;
+
+    if( $msg ) {
+	chomp $msg;
+	print $msg, "\n";
+	print "\n";
+    }
+
+    print <<_USAGE_;
+usage: $prognam [--options] [log1 .. logn]
+
+General program options:
+    --help       	      	show this message and exit
+    --version    	      	show program version and exit
+    --settings   	      	show current settings and exit
+    --dry-run                   show what you would normally do, but
+                                don't actually do it
+    --home=/path/to/home        location of your home directory. You
+                                usually don't need to change this
+    --config=/path/to/config  	path to config file
+
+Savelogs behavior:
+    --process=move|,filter|,archive|,compress|,delete
+				specify which archiving phases to
+				execute. By default, all phases are
+				run, though if no filter is specified
+				(via the --filter option), the filter
+				phase is skipped. 'move' renames the
+				log file(s). 'filter' runs the log
+				file through a user-specified program
+				and saves the output. 'archive' adds
+				the log file to a tar file (via gtar
+				or tar). 'compress' compresses the
+				archive (or log file if the 'archive'
+				option was omitted) using gzip or
+				compress.  'delete' removes the log
+				files when archiving is complete.
+
+Savelogs reporting:
+    --loglevel=n              	show information while running. n is an
+			      	integer between 0 and 5 inclusive with
+			      	0 being silent and 5 being verbose
+    --logfile=[stdout|stderr|/path/to/log]
+                                if specified, output from savelogs will
+			      	be sent to this file. If specified
+			      	without a pathname, the default (stdout)
+				will be written to instead. You may
+				also specify 'stderr'.
+
+How savelogs finds your log files:
+    --apacheconf=/path/to/conf  location of Apache's configuration
+                                file (httpd.conf)
+    --apachelog=pattern         what Apache logging directives to look
+				for when finding logs in Apache's
+				httpd.conf file. By default, savelogs
+				looks for TransferLog, ErrorLog,
+				AgentLog, RefererLog, and CustomLog
+    --apachelogexclude[=pattern]
+				a regular expression used to exclude
+				certain log files from being
+				processed. For example, the pattern
+				'/dev/null' will exclude any log files
+				in httpd.conf with the string
+				'/dev/null' in them. A more precise
+				match of '^/dev/null\$' is safer. Any
+				Perl regular expression will work.
+
+				By default, savelogs uses
+				'^/dev/null\$|\|' as an exclude pattern,
+				so if you have one or more logs
+				directed to /dev/null they won't be
+				processed. Similarly, any logs
+				containing a pipe will be skipped.
+
+				You may add additional patterns to
+				exclude from processing by specifying
+				the option multiple times. If you
+				specify apachelogexclude without any
+				patterns, all exclude patterns will
+				be removed and all log files will be
+				processed (if they match other
+				criteria).
+
+How savelogs renames your files:
+    --sep[=character]           the character to use to separate the
+				log file from the extension. By
+				default a dot (.) is used. Other
+				popular characters are underscore (_)
+				and hyphen (-). If no separator is
+				given, the default will override any
+				config file separator
+    --ext[=string]              the extension given to log files
+				before archiving. By default, this
+				string is set to today's date in
+				yymmdd format. If no extension is
+				given, the default yymmdd is used,
+				overriding any configuration file
+				options.
+    --hourly                    add a letter of the alphabet to the
+				extension string, a different letter
+				occuring each hour. Midnight (0:00)
+				is 'a', 1am is 'b' and so forth up to
+				23:00.
+    --postmovehook=command      an optional (though recommended)
+				command to execute after renaming log
+				files. On the Virtual Server system,
+				'restart_apache' is a good choice.
+    --force-pmh                 execute the postmovehook command even
+				if there are no logs to process. By
+				default savelogs will not execute the
+				postmovehook command if there are no
+				logs.
+    --stem=extension            specify a temporary extension for use
+				in programs that need a consistent
+				filename to work from, such as most
+				log file analysis programs. If
+				specified, savelogs will make a
+				symbolic link in the form of
+				'log.<stem>' where stem is the
+				extension you specify. If no extension
+				is specified, the default is the
+				string 'today'.
+    --stemhook=command          an optional command to execute after
+				a log has been stemmed. Here is where
+				you would place the command to run
+				your log file analysis program or
+				other process that requires the
+				predictable name that the stem option
+				offers.
+    --stemlink=link type        specify the type of link you wish to
+				make during the stem phase. Options
+				are 'symlink' (default), 'hard', or
+				'copy'. 
+    --filter=command            an optional command used to filter
+				log files before they're archived.
+				Popular commands are "egrep -v
+				'/images/' \$LOG" which would exclude
+				lines with the string '/images/' in
+				it.
+
+How savelogs archives your files:
+    --tar=path/to/tar           where to find a suitable tar binary
+				for archiving files. By default,
+				savelogs searches your path for gtar
+				and tar.
+    --zip=path/to/zip           where to find a suitable compression
+				binary to compress archives or log
+				files. By default, savelogs searches
+				your path for 'gzip' and failing that,
+				'compress'.
+    --archive=archive_name.tar  name of the tar file to store log
+				files in. By default, savelogs uses
+				the name of the log file being
+				processed as the archive name, so that
+				subsequent executions of savelogs will
+				add log files of similar nature to a
+				single archive. For example,
+				access_log will be in access_log.tar
+				and error_log will be in
+				error_log.tar. If you wish to change
+				the default behavior and specify a
+				single file for all logs in a
+				particular directory to be stored in,
+				specify a filename. If you wish to
+				store _all_ logs (regardless of their
+				location) in a single file, specify
+				a path and filename.
+    --full-path                 store log files using the full
+				pathname relative to your home
+				directory. By default, savelogs stores
+				files in archives relative to the
+				directory in which the log file is
+				located. This option changes that
+				behavior and stores files with their
+				full path information in the archive.
+    --clobber                   overwrite without prompting existing
+				compressed archives. This option is
+				on by default. To turn this behavior
+				off (i.e., to tell savelogs to prompt
+				before compressing archives), use
+				'--noclobber' or 'Clobber off' in your
+				configuration file.
+
+    See savelogs(1) for more information.
+_USAGE_
+
+    exit;
+}
+
+1;
+__END__
+
+=head1 NAME
+
+B<savelogs> - Save log files
+
+=head1 SYNOPSIS
+
+B<savelogs> saves your log files in a nice way (by default).
+
+    savelogs --postmovehook='/usr/local/bin/restart_apache' \
+             --apacheconf=/www/conf/httpd.conf /var/log/messages
+
+    savelogs `cat list_of_logs_to_process.txt`
+
+    savelogs --loglevel=2 /var/log/maillog /var/log/cronlog \
+             /var/log/messages
+
+    savelogs --config=/etc/savelogs.conf
+
+    savelogs --period=15 /var/log/messages
+
+=head1 DESCRIPTION
+
+B<savelogs> is a flexible and robust log file archival system. Its
+logic is simple: move (rename) the log file, filter data from the log
+file, store the log file in an archive (via tar or gtar), and compress
+the archive (via gzip or compress). After successful compression, the
+original log file is deleted.
+
+All of the above phases are optional. This means that you may simply
+delete files if you wish. Or you may simply compress existing log
+files. Or you may move files and add them to a tar file but leave the
+tar file uncompressed, etc. You pick ;o)
+
+(If you just want to cut to the chase and don't care how B<savelogs>
+works, see the L<EXAMPLES> section near the bottom of this document.)
+
+=head2 Savelogs Phases
+
+The processing order may be abbreviated into these five phases:
+
+    move -> filter -> archive -> compress -> delete
+
+any of which may be subtracted from the process order.  In addition
+to these phases are some intermediate 'hooks' where you may supply an
+external program or shell command to invoke. This is useful if you're
+rotating web server log files and you need to HUP (restart) your web
+server after moving the logs (for example).
+
+Subtracting phases is done in one of two possible ways. The first way
+is to specify it in the configuration file:
+
+    Process          move,archive,delete
+
+which will move log files and archive them (but not filter or compress
+them). After successful archival, the original log files will be
+deleted.
+
+The second way is to specify it on the command-line:
+
+    --process=compress,delete
+
+which will simply compress log files (but not move, filter, or archive
+them).
+
+In addition to the five phase processing options above, you may also
+employ the following abbreviations:
+
+=over 4
+
+=item I<(no option specified)>
+
+If you specify no B<process> option, the default is I<move,compress>.
+
+=item I<none>
+
+Do none of the phases. This isn't a very useful option.
+
+=item I<all>
+
+Do all of the phases.
+
+=back
+
+=head2 An Overview
+
+A typical B<savelogs> session might begin by typing this command:
+
+    savelogs --process=all /var/log/messages
+
+After which the following phases will execute:
+
+=over 4
+
+=item I<move>
+
+/var/log/messages --> /var/log/messages.010523
+
+=item I<filter>
+
+(no filter supplied, so skip this phase)
+
+=item I<archive>
+
+add messages.010523 to /var/log/messages.tar
+
+=item I<compress>
+
+/var/log/messages.tar --> /var/log/messages.tar.gz
+
+=item I<delete>
+
+(/var/log/messages.010523 is deleted)
+
+=back 4
+
+=head2 A Word About Paths
+
+All paths you specify to B<savelogs> should be relative to your home
+directory. You do not need to use a tilde (~). You may assume that
+B<savelogs> runs from your home directory and knows how to handle
+absolute paths.
+
+If my real home directory were located in F</usr/home/joe> and I
+wanted to rotate the log file located in
+F</usr/home/joe/var/log/messages>, I would do something like this:
+
+    savelogs /var/log/messages
+
+and B<savelogs> would Do What I Mean.
+
+The only exception to this are external commands given to
+B<postmovehook> and other such options. Paths you specify here really
+are full paths.
+
+=head1 CONFIGURATION
+
+=head2 Configuration file option format
+
+B<savelogs> will read its configuration options from a configuration
+file (which you must supply) or from the command-line. Creating a
+configuration file is easy: it is a simple Apache-style plaintext file
+that has options specified in this format:
+
+    Option          value
+
+where I<Option> is one of the options below and I<value> is either a
+true/false; yes/no; on/off combination or some string value, such as
+a pathname and file (depending on the nature of the option).
+
+Your distribution of B<savelogs> may have included a sample
+configuration file for you to edit as you wish in
+F<~/etc/savelogs.conf.sample>.
+
+=head2 Option processing order
+
+Configuration options are first read from B<savelogs> internal
+defaults, which are sprinkled throughout this document. Next
+B<savelogs> reads its configuration file, if any is specified. Lastly,
+B<savelogs> uses options from the command-line.
+
+For example, the default value for the B<period> directive is 10. If
+you ran B<savelogs> like this:
+
+    savelogs --period /var/log/messages
+
+every day for 10 days, you would have 10 archived log files.
+
+If you have in your configuration file:
+
+    Period            5
+
+and ran the same command above every day for 10 days, you'd only have
+5 archived log files because the configuration file overrides
+B<savelogs> internal defaults. Finally, if you had a configuration
+file with the previously mentioned value for B<period> and ran this
+command:
+
+    savelogs --period=7 /var/log/messages
+
+every day for 10 days, you would have 7 archived log files because
+command-line options override configuration file options (which
+override internal default values).
+
+=head2 Available options
+
+All options you may specify on the command-line you may also sepcify
+in a configuration file (except the configuration file directive
+itself). For example, if you had a cronjob that did this:
+
+    savelogs --process=delete --postmovehook=/usr/local/bin/restart_apache \
+    --apacheconf=/www/conf/httpd.conf
+
+you could make a nice configuration file (call it
+~/etc/savelogs1.conf) that would do the same thing:
+
+    Process         delete
+    PostMoveHook    /usr/local/bin/restart_apache
+    ApacheConf      /www/conf/httpd.conf
+
+and then invoke your cron like this:
+
+    savelogs --config=/etc/savelogs1.conf
+
+=head2 Case-sensitivity
+
+A sample configuration file may be located in
+~/etc/savelogs.conf.sample which you may copy and edit as you wish.
+Configuration file I<directives> are case-insensitive:
+
+    Process    move,compress
+    PROCESS    move,compress
+    process    move,compress
+    pROceSs    move,compress
+
+are all the same directive to savelogs. Configuration file I<values>
+ARE case-sensitive.
+
+    ApacheConf    /www/conf/httpd.conf
+    ApacheConf    /WWW/conf/httpd.conf
+    ApacheConf    /www/CONF/httpd.conf
+    ApacheConf    /www/conf/Httpd.conf
+
+are four distinct files.
+
+=head2 Testing configurations
+
+When you are testing new configuration directives, use the B<dry-run>
+option and watch the log output (see the B<loglevel> and B<logfile>
+directives). This will help you avoid losing data unnecessarily.
+
+You may also specify the B<settings> option which will show you all
+the current settings after defaults, configuration file, and
+command-line options have been processed.
+
+=head1 OPTIONS
+
+Options given below are configuration directives that may appear in
+a configuration file or on the command-line. Options are
+case-insensitive, i.e., I<ApacheLog> is the same as I<apachelog>,
+though the values associated with the options are often case-sensitive
+(e.g., paths, filenames, etc.)
+
+Options specified on the command-line should be prefixed with two
+hyphens. Some options do not make sense in a configuration file or
+need to occur before the configuration file is parsed such as
+B<config>, B<help>, or B<home>.
+
+=head2 Running Savelogs
+
+=over 4
+
+=item B<help>
+
+Shows a brief usage statement and exits.
+
+Example:
+
+    savelogs --help
+
+=item B<version>
+
+Shows the current version of B<savelogs> and exits.
+
+Example:
+
+    savelogs --version
+
+=item B<settings>
+
+Shows the current settings of B<savelogs> and exits.
+
+Example:
+
+    savelogs --settings --apacheconf=/www/conf/httpd.conf \
+             /var/log/messages
+
+=item B<dry-run>
+
+Shows you what will happen if you were to run B<savelogs> with the
+current settings without actually doing it. This is a useful option
+to specify if you want to see what effect some changes might have, or
+to see which files are going to get archived with the current
+settings.
+
+Note that B<savelogs> running under the B<dry-run> directive will
+sometimes produce errors that wouldn't occur during normal use. This
+can happen for a variety of reasons, mostly related to B<savelogs>
+looking for files that don't yet exist, or archives that don't yet
+exist because they weren't actually created. In this respect,
+B<dry-run> doesn't give you precisely what will happen, but it does
+give you a good idea.
+
+Example:
+
+    savelogs --dry-run /var/log/foo
+
+=item B<home>
+
+Changes the default base location of where B<savelogs> runs from. This
+is mostly a debugging utility. Consider this an advanced feature which
+should probably be ignored. Defaults to the process owner's home
+directory (which is almost always what you want).
+
+Example:
+
+    Home                /usr/home/joe/usr/home/bob
+
+=item B<config>
+
+Changes the default configuration file B<savelogs> reads at startup.
+This should be done from the command-line or it won't have any effect.
+
+Example:
+
+    savelogs --config=/etc/my_other_savelogs.conf
+
+=item B<process=[move],[filter],[archive],[compress],[delete]>
+
+Tells B<savelogs> which phases to execute. If you just want to move
+(rename) logs, do this:
+
+    savelogs --process=move /var/log/messages
+
+and F<~/var/log/messages> will become F<~/var/log/messages.yymmdd>
+(where yymmdd are today's date).
+
+For just removing logs, specify the I<delete> option. You can get
+fancy:
+
+    savelogs --process=move,compress /var/log/messages
+
+which renames the log file F<~/var/log/messages> to
+F<~/var/log/messages.yymmdd> and then compresses it, not filtering,
+archiving (i.e. putting into a separate tar file), or deleting it (the
+I<compress> option also renames the file so that I<delete> becomes
+useless since the file as it was no longer exists).
+
+I<move,compress> is the default value for the B<process> option, so
+the above directive could have also been specified:
+
+    savelogs /var/log/messages
+
+You may also specify B<all> (the default) or B<none> as shortcuts.
+
+=back
+
+=head2 Savelogs Logging
+
+B<savelogs> has an internal logging facility that helps you diagnose
+problems, or just see what's going on. By default, B<savelogs> writes
+to F<stdout> (i.e., your screen if you're running this from a tty).
+
+=over 4
+
+=item B<loglevel=#>
+
+Determines how verbose B<savelogs> is when it's writing its own
+internal messages. Valid values are between 0 and 5 inclusive.
+
+Example:
+
+    LogLevel            3
+
+The general rule of thumb for B<savelogs> logging is this:
+
+    Level  What will be logged
+    =====  ===================
+    0      no output except fatal errors
+    1      Level 0 + start/finish stats, errors
+    2      Level 1 + warnings, logfiles to process
+    3      Level 2 + chdir, filter, phase completion
+    4      Level 3 + phase core actions, phase beginning
+    5      Level 4 + everything else
+
+The first few times you run B<savelogs>, try a higher B<loglevel>
+value to see what's happening with your log files. Once you're
+comfortable with how B<savelogs> works, you may turn it down a few
+notches (level 1 is usually fine) so at least you can check to see if
+your cronjob actually ran ;o)
+
+=item B<logfile=[stdout|stderr|/path/to/log]>
+
+B<savelogs>, depending on the B<loglevel> you've specified, writes
+what it's doing, such as moving, archiving, or deleting, etc.
+B<logfile> tells B<savelogs> where to write all these messages.
+
+The default value for B<logfile> is F<stdout> which means that your
+output will go to the screen unless you've redirected F<STDOUT>. You
+may also specify F<stderr> or the path to a file where you'd like
+messages to be appended.
+
+Example:
+
+    LogFile             /var/log/savelogs.log
+
+=back
+
+=head2 How Savelogs Finds Logs to Process
+
+B<savelogs> normally just processes the logs you specify on the
+command-line (items on the command-line that are not recognized as
+options are assumed to be log files to process).
+
+You may also save wear on your finger tips and phosphor in your
+monitor by using the following directives.
+
+=over 4
+
+=item B<Log=/path/to/log>
+
+This works just like adding a file on the command-line, but is included so that you can put log files you want processed in a configuration file. It will also work on the command-line:
+
+Example:
+
+    savelogs --log=/var/log/messages
+
+is the same as:
+
+    savelogs /var/log/messages
+
+which is also equivalent to a config file named '~/etc/savelogs.conf'
+with this single line:
+
+    Log                  /var/log/messages
+
+and invoked like this:
+
+    savelogs --config=/etc/savelogs.conf
+
+=item B<apacheconf=/path/to/httpd.conf>
+
+If you specify this option, giving it a valid httpd.conf file,
+B<savelogs> will parse your Apache configuration file looking for
+standard log file directives. Any files found will be processed.
+
+Example:
+
+    savelogs --apacheconf=/www/conf/httpd.conf
+
+or in your configuration file:
+
+    ApacheConf          /usr/local/etc/httpd/conf/httpd.conf
+
+=item B<apachelog>
+
+This option allows you to tell B<savelogs> which logs to process in
+the httpd.conf file specified by B<apacheconf>. The default value for
+the B<apachelog> directive is:
+
+    TransferLog|ErrorLog|AgentLog|RefererLog|CustomLog
+
+You may do something clever like this:
+
+    savelogs --apacheconf=/www/conf/httpd.conf --apachelog=TransferLog
+
+which would archive all of your access_log files. Then after running
+this command, you could do this:
+
+    savelogs --process=delete --apacheconf=/www/conf/httpd.conf \
+             --apachelog=ErrorLog
+
+which would delete your error_log files.
+
+In general, the fewer values you specify in the B<apachelog> directive
+the faster B<savelogs> will find your log files (though the speedup
+really is negligible, it may also save you from rotating logs you
+didn't want to).
+
+    ApacheLog           TransferLog|ErrorLog
+
+would be sufficient for most people using combined Apache logs.
+
+=item B<apachelogexclude>
+
+For those who want somewhat finer control of which logs get processed
+in their Apache configuration file, the B<apachelogexclude> directive
+allows you to specify a Perl regular expression (which may simply be
+a string like 'error') of log files to I<exclude> when processing
+logs. This way you could do something like this:
+
+    savelogs --apacheconf=/www/conf/httpd.conf --apachelogexclude=logs/bob
+
+which would process all logs found in your httpd.conf file I<except>
+log files whose names contain the string 'logs/bob'. Maybe Bob likes
+to rotate his logs using another program or system (conceivable,
+though unlikely).
+
+Multiple occurances of B<apachelogexclude> are allowed:
+
+    ApacheLogExclude          /dev/null
+    ApacheLogExclude          \|
+    ApacheLogExclude          logs/bob
+
+which would exclude log files whose names contained '/dev/null' or
+'logs/bob' from being processed. Any valid Perl regular expression
+will work, so:
+
+    ApacheLogExclude          ^/dev/null$
+
+is not the same as the previous example. This example will only match
+log files whose name is exactly F</dev/null>, no more, no less.
+
+By default, B<savelogs> uses the following patterns to determine logs
+to exclude:
+
+    ^/dev/null$
+    \| (this is a literal pipe character)
+
+This means that by default B<savelogs> will not attempt to archive a
+log whose name is '/dev/null' or whose name contains a pipe (|). If
+for some bizarre reason you wish to remove these defaults when you
+run B<savelogs>, you can give an empty B<apachelogexclude> option on
+the command-line:
+
+    % savelogs --apachelogexclude= --config=/etc/savelogs.conf
+
+=back
+
+=head2 Moving (Renaming) Files
+
+=over 4
+
+=item B<touch>
+
+Touches the original file, creating it if necessary. This is useful
+for programs that log in "append-only" mode and do not create the log
+file if it is missing. Once B<savelogs> has renamed a log file,
+B<touch> will create the file if it does not exist, or reset the
+timestamp if it does.
+
+=item B<size=kbytes>
+
+Logs smaller than I<kbytes> will not be included in any processing.
+To override a default setting, specify B<--size> with no arguments on
+B<savelogs> command-line.
+
+    Size                      5000
+
+will skip all log files smaller than 5 megs, regardless of other
+settings.
+
+=item B<ext=string>
+
+Set the filename extension to 'string'. When a file is moved, it is
+renamed to the original filename plus the extension you specify. If
+no extension is specified, today's date is used in 'yymmdd' format.
+Other options include I<today> and I<yesterday>. 
+
+You may not use B<ext> in a configuration file with a value in
+backticks (e.g., the line:
+
+    ## this directive will not work: don't use it!
+    Ext                  `/usr/local/bin/smalldate -u`
+
+in a configuration file will not work). Any other (static) value for
+B<ext> in a configuration file will work.
+
+See also B<hourly> below for information on how to modify B<ext> even
+further.
+
+=item B<sep=char>
+
+The separator character to use when moving files. By default this
+character is a dot ('.'). Other favorites are underscore ('_') and
+hyphen/minus sign ('-').
+
+Example:
+
+Use an underscore character:
+
+    savelogs --sep='_' --process=move /var/log/foo
+
+will rename F<~/var/log/foo> to F<~/var/log/foo_yymmdd> (where yymmdd
+is today's date).
+
+Use no separator (just concatenate the extension with the filename):
+
+    savelogs --sep= --process=move /var/log/foo
+
+will rename F<~/var/log/foo> to F<~/var/log/fooyymmdd>.
+
+=item B<hourly>
+
+Adds a letter of the alphabet to the back of the filename extension.
+This is useful if you are rotating logs several times a day. For
+example, if you specified your extension (via B<ext>) as 'foo', any
+log files rotated in the 10am hour will be named 'log.fook'. At 11am,
+all logs will be called 'log.fool' and so forth.
+
+Example:
+
+    savelogs /path/to/log_file
+
+This will rename the log file to I<log_file.yymmdd> where I<yymmdd>
+are today's year, month, and day of month.
+
+    savelogs --hourly /path/to/log_file
+
+If you specify the B<hourly> option (or in your configuration file,
+the B<Hourly> directive), the log will be renamed to
+I<log_file.yymmddz> where the I<z> represents the current hour as a
+letter of the alphabet (0 = a, 1 = b, 2 = c, etc.).
+
+The B<hourly> option is available for log file rotation that occurs
+several times per day. If you need to rotate more often than several
+times per day, you'll need to either:
+
+=over 4
+
+=item *
+
+use B<period> to rotate logs with a unique number as the extension.
+B<period>, discussed below, renames log files with a simple integer:
+F<log> becomes F<log.0>, the former F<log.0> becomes F<log.1> and so
+forth.
+
+=item *
+
+specify an extension with B<--ext> that suits your needs. For example,
+you might write a small program in Perl that outputs a longer date
+extension and include it like this:
+
+    savelogs --ext=`/path/to/prog`
+
+A sample program called B<smalldate> has been included with
+B<savelogs> to do this. Try:
+
+    savelogs --ext=`~/usr/local/bin/smalldate`
+
+Type B<smalldate -u> for usage.
+
+=item *
+
+Download your log files often and delete them from the server (you
+can use B<savelogs> to delete them for you)
+
+=back
+
+=item B<period[=count]>
+
+Renames the file based on a period, which is how frequently you run
+B<savelogs>. If you specify B<period> you may also optionally specify
+a 'count', which is how many log files to save using the period
+option:
+
+    savelogs --period=8 /var/log/messages
+
+You may also use the B<count> option, which is deprecated for backward compatibility and some possible future enhancements:
+
+    savelogs --period --count=8 /var/log/messages
+
+If you do not specify a count value (either in B<period> or B<count>),
+a count of I<10> is assumed.
+
+The B<period> option will rename the current log to F<logfile.0>, the
+log that was previously named F<logfile.0> to F<logfile.1> and so on,
+much like B<newsyslog(8)>.
+
+When you specify the B<period> option, the process phases I<move> and
+I<compress> are assumed. If you also specify a process phase of
+I<filter>, that will be honored also.
+
+The B<period> option will override any other B<sep> and B<ext> options
+specified, using the default dot ('.') for the separator and an
+integer for the extension.
+
+The author also recommends you don't try to mix B<period> named log
+files with other log files in the same directory, since B<savelogs>
+may not be able to tell which logs are oldest based on the filename
+extension and destroy the wrong files. You can safely use any default
+B<savelogs> extensions (e.g., the default 'today' or 'yesterday'
+extensions) or your own extension I<if> your own extension contain at
+least one non-digit (0-9) I<or> your own extension has 5 or more
+digits. If you meet either of these criteria in your own extension,
+you may feel confident about mixing logs.
+
+For those familiar with Unix system adminstration, B<period> works
+like B<newsyslog(8)> with the B<B> option specified in the newsyslog
+configuration file (the B<B> option tells newsyslog to treat logs as
+binary files and not append the status message to the log).
+
+An example use of the B<period> option:
+
+    savelogs --touch --period=15 /var/log/maillog /var/log/messages
+
+will move any existing F<~/var/log/maillog> and F<~/var/log/messages>
+to F<~/var/log/maillog.0> and F<~/var/log/messages.0> and compress
+them. By specifying the B<touch> option, the original
+F<~/var/log/maillog> and F<~/var/log/messages> will be 'touched',
+recreating the files. When this command is run again,
+F<~/var/log/maillog.0> is moved to F<~/var/log/maillog.1> and
+F<~/var/log/maillog> is moved to F<~/var/log/maillog.0>.
+
+=item B<count>
+
+Limits the number of logs saved using the B<period> option. The
+internal default value for B<count> is I<10>.
+
+If you are using the B<period> option, as of version 1.21 you may now
+simply specify the B<count> as part of the B<period> option:
+
+    savelogs --period=5 /var/log/messages
+
+=item B<postmovehook=command>
+
+Runs an arbitrary system command you specify after moving files. If
+you are rotating Apache log files, you should use a command that will
+tell your web server to close its log file descriptors and re-open
+them (e.g., 'restart_apache' would do that on a Virtual Server).
+
+Example:
+
+    savelogs --apacheconf=/www/conf/httpd.conf \
+             --postmovehook='/usr/local/bin/restart_apache'
+
+or even nicer in your configuration file:
+
+    PostMoveHook        /usr/local/bin/restart_apache
+
+Paths in B<postmovehook> are NOT relative to your home directory, as
+most other paths are. You should specify the full path to the file if
+the file is not in your environment's B<$PATH>.
+
+B<Variables>
+
+Some internal B<savelogs> variables are available during the
+I<postmovehook> phase. These variables are automatically interpolcated
+by B<savelogs> during execution and are guaranteed to contain some
+useful value.
+
+=over 4
+
+=item B<$APACHE_CONF>
+
+Contains the full path to the Apache configuration file as specified
+with the B<apacheconf> option.
+
+    savelogs --apacheconf=/www/conf/httpd.conf \
+             --postmovehook='touch $APACHE_CONF'
+
+=item B<$HOME>
+
+Contains the path to your home directory.
+
+    savelogs --postmovehook='$HOME/bin/myprogram'
+
+=back
+
+=item B<force-pmh>
+
+Executes the B<postmovehook> command even if there are no logs to
+process. By default, B<savelogs> will not execute the B<postmovehook>
+command if there are no logs.
+
+=item B<stem>
+
+Like B<ext> except the B<stem> is used in addition to B<ext>. After
+the I<move> and I<postmovehook> phases have completed, B<savelogs>
+checks to see if you have defined a B<stemhook>. If a B<stemhook> has
+been defined, a symbolic link to the log is made using B<stem>.
+
+As an example, say you were processing F<~/var/log/messages>. During
+the I<stem> phase, B<savelogs> would do this:
+
+    messages.today -> messages.<ext>
+
+    (where <ext> is the extension you specified or today's date by
+    default)
+
+Once the B<stemhook> command has executed, the symbolic link (or hard
+link or copy, as specified by B<stemlink>) is removed.
+
+=item B<stemhook=command>
+
+A command to execute, much like B<postmovehook>, except that this
+phase is suited for log file analysis tools that require a predictably
+named, dead (i.e., no logging is currently being done to it) log file.
+B<urchin> and B<analog> are good examples of programs that require
+such logs.
+
+An example use for B<stemhook> would be:
+
+    % savelogs --stemhook="$HOME/usr/local/urchin/urchin" \
+      /www/logs/access_log /www/logs/error_log
+
+B<urchin> should be instructed to operate on F</www/logs/access_log.today>
+and F</www/logs/error_log.today>.  B<urchin> should also be instructed
+to do nothing to the log files since we're allowing B<savelogs> to
+manage them for us. Any changes resulting from the B<stemhook> command
+to the log file will occur in the original log file.
+
+The same variables for B<postmovehook> are available for B<stemhook>.
+
+=item B<stemlink=linktype>
+
+Specify the type of link that should be made during the I<stem> phase.
+The default is I<symlink>. Other options are I<hard> which creates
+hard links and I<copy> which creates a copy of the original file.
+I<hard> links are useful for B<stemhook> commands that cannot process
+symbolic links. If your B<stemhook> command modifies the log file,
+you may wish to choose the I<copy> option which will be discarded
+after the B<stemhook> command is executed.
+
+=back
+
+=head2 Filtering
+
+A filter is simply a program that generates something on F<STDOUT>.
+They may be pipelines or other programs.
+
+=over 4
+
+=item B<filter=filter_command>
+
+If the filter process option is specified (via the B<process>
+directive), you should supply a program to filter your log (via the
+B<filter> command), such as egrep or perl (or a pipeline or a shell
+script containing your commands, etc.).
+
+If no filter command is given, the filter phase will be skipped (even
+if you specify --process=filter as the B<process> directive). Consider
+following filter command:
+
+    --filter='/usr/bin/egrep -v "/images/" \$LOG'
+
+When B<savelogs> gets to its filter phase, it will open a pipe to the
+above command. Output from this command will be saved to a temporary
+file, then the temporary file will be renamed to replace the original
+log file.
+
+Notice the strange I<$LOG> variable. This is an internal B<savelogs>
+variable that refers to the location of the log file B<savelogs> is
+currently working on. It is automatically replaced with the right file
+during execution.
+
+If you are supplying a B<filter> command on the command-line, the
+backslash (\) in front of $LOG is necessary to tell the shell to not
+interpolate <$LOG> as a shell variable, but instead pass it along
+untouched to B<savelogs>. The backslash is not necessary if you are
+specifying a B<filter> directive in the configuration file:
+
+    Filter          /usr/bin/egrep -v "/images/" $LOG
+
+=back
+
+=head2 Archiving and Compressing
+
+=over 4
+
+=item B<gtar>
+
+=item B<tar>
+
+Specifies the location of the tar binary to use. This defaults to
+whatever it can find on your system. You usually don't need to modify
+this option.
+
+Example:
+
+    Gtar                 /usr/local/bin/gtar
+
+If both B<gtar> and B<tar> are specified, B<gtar> will be used.
+
+=item B<archive>
+
+Specifies the name of the archive to which files will be appended.
+
+This directive is somewhat tricky to understand. Under normal use,
+B<savelogs> uses the name of the file being archived as the archive
+name. For example, if you were archiving a file named
+F<~/var/log/messages>, the name of the archive would be
+F<~/var/log/messages.tar>.
+
+If you are archiving multiple files (which is common), each file will
+be stored in its own archive by name in the directory where the file
+is located. For example, if you had several files located in
+F<~/var/log>, each file would be stored in its own archive named
+F<filename.tar> in the F<~/var/log> directory.
+
+If you want to lump together all files in a particular directory into
+one archive, use the B<archive> directive without any path
+information:
+
+    savelogs --archive=system.tar \
+             /var/log/messages /var/log/proftpd /var/log/foo \
+             /www/logs/access_log /www/logs/error_log
+
+This will archive F<~/var/log/messages>, F<~/var/log/proftpd>, and
+F<~/var/log/foo> in a single file named F<~/var/log/system.tar> (which
+may later be compressed if you've so specified).
+F<~/www/logs/access_log> and F<~/www/logs/error_log> will also be
+lumped together in a file called F<~/www/logs/system.tar>.
+
+If you want to lump together all files for this B<savelogs> session
+into one archive, use the B<archive> directive and specify the full
+path to the archive:
+
+    savelogs --archive=/var/tmp/logs.tar /var/log/messages \
+             --apacheconf=/www/conf/httpd.conf
+
+This will archive F<~/var/log/messages> and all log files found in
+the Apache configuration file into a single archive named
+F<~/var/tmp/logs.tar> (which may later be compressed).
+
+If you wish to place the archive in your home directory, you may be
+tempted to just do this:
+
+    savelogs --archive=/logs.tar
+
+This won't work. Because of the way B<savelogs> tries to simplify
+things relative to your home directory, the leading slash is dropped
+and B<savelogs> doesn't find any path information (and therefore
+places the archive in where the files are).
+
+To put files in your home directory, preceed the B<archive> command
+with a dot-slash:
+
+    savelogs --archive=./logs.tar
+
+This won't put the archive in your current working directory, as some
+are wont to assume, but in your home directory. B<savelogs> has no
+notion of a current working directory because it is always changing
+directories from your home to the directory where the log files are
+and back.
+
+=item B<full-path>
+
+Specifies whether files stored in archives are full paths relative to
+your home directory or relative paths relative to the directory in
+which the file is found.
+
+If B<full-path> is not specified, paths are stored in the tar file
+I<relative> to their parent directory.
+
+Example:
+
+    savelogs /var/log/messages
+
+will create an archive with the following file in it:
+
+    messages
+
+while
+
+    savelogs --full-path /var/log/messages
+
+will create an archive with the following file in it:
+
+    var/log/messages
+
+When you extract this file later on, the paths will be created for
+you if they don't exist, which may not be what you want (but, of
+course, it may be what you want which is why we have this directive).
+
+=item B<gzip>
+
+=item B<compress>
+
+=item B<uncompress>
+
+Specifies the location of the gzip/compress/uncompress binaries for
+decompressing files (files ending with '.gz' or '.Z'). Use of
+B<compress> and B<uncompress> is deprecated. If your system has a
+B<gzip> binary in a non-standard location, specify its location with
+this directive. If B<gzip> and B<compress> are specified, B<gzip> will
+be used.
+
+By default (if none of the above options are specified), B<savelogs>
+will search for a B<gzip> binary in your path and use it.
+
+=item B<clobber>
+
+If a compressed archive already exists along side a non-compressed
+archive (e.g., F<archive.tar> and F<archive.tar.gz>), and you've
+instructed B<savelogs> to compress F<archive.tar>, some compression
+programs (like B<gzip>) will ask you for confirmation before
+overwriting existing files.
+
+To get around this, B<savelogs> by default enables the 'force' option
+on compression programs (usually B<-f>). This way, if you're running
+B<savelogs> from a cron job or another method where there is no
+controlling terminal, B<savelogs> keeps running.
+
+If you're running B<savelogs> interactively (i.e., from a tty) and
+want B<savelogs> to prompt you to overwrite existing compressed files,
+specify the B<noclobber> option:
+
+Example:
+
+    savelogs --noclobber
+
+or in your configuration file:
+
+    Clobber             no
+
+=back
+
+=head1 EXAMPLES
+
+The author recommends liberal use of the B<dry-run> option when
+testing these examples or when making big changes to your
+configuration file or command-line options. Doubly-so when you have
+the B<delete> process option enabled. There's no 'undelete' for UNIX.
+
+=head2 Archiving a single log file
+
+    savelogs /path/to/log_file
+
+By default, B<savelogs> will move, and compress a log file. This is
+its simplest use. If this command is run daily, the result will be a
+file name like the old file with a I<yymmdd> extension. This file will
+be compressed.
+
+=head2 Nuking logs
+
+You can use B<savelogs> (contrary to its name) to just wipe out log
+files and reclaim the disk space. If you've got a couple of files that
+from time to time just get too big and there's really no valuable
+information in them, do something like this:
+
+    savelogs --process=delete /path/to/log_file1 /path/to/log_file2
+
+If you want to nuke all Apache log files, do something like this:
+
+    savelogs --process=delete --postmovehook=/usr/local/bin/restart_apache \
+    --apacheconf=/www/conf/httpd.conf
+
+When you specify only the I<delete> as a process option, no logs are
+moved, archived, or compressed. They're just deleted.
+
+=head2 Compressing logs daily
+
+Compressing logs daily is easy:
+
+    savelogs /var/log/messages
+
+will make:
+
+    -rw-r--r--  1 test  vuser  751327 Jul  6 12:48 messages
+
+become:
+
+    -rw-r--r--  1 test  vuser   84625 Jul  6 12:48 messages.010706.gz
+
+=head2 Compressing logs daily if needed
+
+    savelogs --size=5000 /var/log/messages
+
+will only compress the log if the size of the file is 5000 kilobytes
+(5 megabytes) or larger.
+
+=head2 Using periodic log rotation
+
+You want to save 3 days worth of Apache log files and 5 days worth of
+system log files. You might try the following lines in your crontab:
+
+    1 0 * * * $HOME/usr/local/bin/savelogs --logfile=/var/log/savelogs \
+    --postmovehook=/usr/local/bin/restart_apache --period=3 \
+    --apacheconf=/www/conf/httpd.conf
+
+    5 0 * * * $HOME/usr/local/bin/savelogs --logfile=/var/log/savelogs \
+    --period=5 /var/log/messages /var/log/ftp.log
+
+Most crontab files require that no lines wrap, so you'd need to make
+sure to keep everything on one line.
+
+Your F<~/www/logs> directory may look something like this after a
+week:
+
+    access_log
+    access_log.0.gz
+    access_log.1.gz
+    access_log.2.gz
+    error_log
+    error_log.0.gz
+    error_log.1.gz
+    error_log.2.gz
+
+and your system logs directory:
+
+    messages
+    messages.0.gz
+    messages.1.gz
+    messages.2.gz
+    messages.3.gz
+    messages.4.gz
+    ftp.log
+    ftp.log.0.gz
+    ftp.log.1.gz
+    ftp.log.2.gz
+    ftp.log.3.gz
+    ftp.log.4.gz
+
+=head2 Archiving all logs
+
+Most people want to group their log files in an archive. This makes
+storing them and retrieving them later for post-processing simple and
+efficient. Your directory tree might look like this:
+
+    usr/local/etc/httpd/logs
+    usr/local/etc/httpd/logs/bar
+    usr/local/etc/httpd/logs/bar/access_log
+    usr/local/etc/httpd/logs/bar/error_log
+    usr/local/etc/httpd/logs/baz
+    usr/local/etc/httpd/logs/baz/access_log
+    usr/local/etc/httpd/logs/baz/error_log
+    usr/local/etc/httpd/logs/biz
+    usr/local/etc/httpd/logs/biz/access_log
+    usr/local/etc/httpd/logs/biz/error_log
+    usr/local/etc/httpd/logs/buz
+    usr/local/etc/httpd/logs/buz/access_log
+    usr/local/etc/httpd/logs/buz/error_log
+    usr/local/etc/httpd/logs/foo
+    usr/local/etc/httpd/logs/foo/access_log
+    usr/local/etc/httpd/logs/foo/error_log
+
+Issue this command:
+
+    savelogs --process=all --apacheconf=/www/conf/httpd.conf
+
+and your directory tree now looks like this:
+
+    usr/local/etc/httpd/logs
+    usr/local/etc/httpd/logs/bar
+    usr/local/etc/httpd/logs/bar/access_log.tar.gz
+    usr/local/etc/httpd/logs/bar/error_log.tar.gz
+    usr/local/etc/httpd/logs/baz
+    usr/local/etc/httpd/logs/baz/access_log.tar.gz
+    usr/local/etc/httpd/logs/baz/error_log.tar.gz
+    usr/local/etc/httpd/logs/biz
+    usr/local/etc/httpd/logs/biz/access_log.tar.gz
+    usr/local/etc/httpd/logs/biz/error_log.tar.gz
+    usr/local/etc/httpd/logs/buz
+    usr/local/etc/httpd/logs/buz/access_log.tar.gz
+    usr/local/etc/httpd/logs/buz/error_log.tar.gz
+    usr/local/etc/httpd/logs/foo
+    usr/local/etc/httpd/logs/foo/access_log.tar.gz
+    usr/local/etc/httpd/logs/foo/error_log.tar.gz
+
+Inside of each compressed archive is a single file:
+
+    access_log.010523
+
+which is the old log renamed with today's date.  When you run this
+command again (e.g., from a cron job) tomorrow, you'll see the same
+list of files above, except that inside each compressed archive is an
+additional file:
+
+    access_log.010523
+    access_log.010524
+
+=head2 Archiving all logs per directory
+
+Say you want to group together all logs in a single directory in one
+archive. Your directory tree might look like this:
+
+    usr/local/etc/httpd/logs
+    usr/local/etc/httpd/logs/bar
+    usr/local/etc/httpd/logs/bar/access_log
+    usr/local/etc/httpd/logs/bar/error_log
+    usr/local/etc/httpd/logs/baz
+    usr/local/etc/httpd/logs/baz/access_log
+    usr/local/etc/httpd/logs/baz/error_log
+    usr/local/etc/httpd/logs/biz
+    usr/local/etc/httpd/logs/biz/access_log
+    usr/local/etc/httpd/logs/biz/error_log
+    usr/local/etc/httpd/logs/buz
+    usr/local/etc/httpd/logs/buz/access_log
+    usr/local/etc/httpd/logs/buz/error_log
+    usr/local/etc/httpd/logs/foo
+    usr/local/etc/httpd/logs/foo/access_log
+    usr/local/etc/httpd/logs/foo/error_log
+
+Try this:
+
+    savelogs --process=all --archive=logs.tar --apacheconf=/www/conf/httpd.conf
+
+and your directory tree now looks like this:
+
+    usr/local/etc/httpd/logs
+    usr/local/etc/httpd/logs/bar
+    usr/local/etc/httpd/logs/bar/logs.tar.gz
+    usr/local/etc/httpd/logs/baz
+    usr/local/etc/httpd/logs/baz/logs.tar.gz
+    usr/local/etc/httpd/logs/biz
+    usr/local/etc/httpd/logs/biz/logs.tar.gz
+    usr/local/etc/httpd/logs/buz
+    usr/local/etc/httpd/logs/buz/logs.tar.gz
+    usr/local/etc/httpd/logs/foo
+    usr/local/etc/httpd/logs/foo/logs.tar.gz
+
+Inside each 'logs.tar.gz' are two files:
+
+    access_log.010523
+    error_log.010523
+
+=head2 Archiving all logs per session
+
+Say you want to lump all logs in a B<savelogs> session into a single
+archive. Specify the B<archive> option with a full path, like this:
+
+    savelogs --process=all --archive=/tmp/all_logs.tar \
+             --apacheconf=/www/conf/httpd.conf /var/log/messages
+
+This will create a single file F</tmp/all_logs.tar.gz> that contains
+all logs found in httpd.conf as well as F</var/log/messages>.
+
+=head1 BUGS
+
+=over 4
+
+=item *
+
+B<savelogs> will not properly interpolate backticks inside the
+configuration file. Because backticks are shell operators, they must
+be visible to the shell (meaning they have to be done on the
+command-line). An example is the B<ext> command where the command-line
+option might look like this:
+
+    savelogs --ext=`smalldate -m`
+
+there is no corresponding configuration file entry.
+
+=item *
+
+You must obey shell escaping rules when you're doing B<filter>
+commands. Sometimes these can be tricky. For example, double quotes
+will do different things than single quotes (I recommend single quotes
+because you can then use the B<$LOG> variable without big headaches).
+
+=back
+
+=head1 AUTHOR
+
+Scott Wiersdorf <scott@perlcode.org>
+
+=head1 COPYRIGHT
+
+Copyright (c) 2001 Scott Wiersdorf. This module may not be duplicated
+in any form without prior written consent of the author or his
+employer.
+
+=cut

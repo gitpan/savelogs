@@ -1,0 +1,51 @@
+#!/usr/local/bin/perl -w
+use strict;
+
+## Scott Wiersdorf
+## Created: Thu May 24 14:44:52 MDT 2001
+## $Id: smalldate,v 1.2 2001/08/28 20:23:58 scottw Exp $
+
+## return a small date string
+## usage:   smalldate [-h|-m|-s]
+## returns: yymmdd[hh[mm[ss]]]
+
+use Getopt::Std;
+use vars qw( $opt_u $opt_h $opt_m $opt_n $opt_s );
+getopts( q(uhmns) );
+
+usage() if $opt_u;
+
+## printf format strings
+my %format = (
+	      'day'     => "%02d" x 3,
+	      'hour'    => "%02d" x 4,
+	      'minute'  => "%02d" x 5,
+	      'second'  => "%02d" x 6,
+	     );
+
+## assign the format string
+my $format = ( $opt_s
+	       ? $format{'second'}
+	       : ( $opt_m
+		   ? $format{'minute'}
+		   : ( $opt_h
+		       ? $format{'hour'}
+		       : $format{'day'} ) ) );
+
+my @date = localtime( time );
+my $date = sprintf( $format, ($date[5]-100), ($date[4]+1), 
+		    $date[3], $date[2], $date[1], $date[0] );
+print $date . ( $opt_n ? "\n" : '' );
+exit;
+
+sub usage {
+    print <<_USAGE_;
+usage:   smalldate -n [-h|-m|-s]
+returns: yymmdd[hh[mm[ss]]]
+
+Specifying '-n' will append a trailing newline to the output; the
+default behavior is to not append a trailing newline.
+
+_USAGE_
+  exit;
+}
