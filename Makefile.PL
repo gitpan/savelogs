@@ -4,11 +4,11 @@ use ExtUtils::MakeMaker;
 my @conf_files = qw( savelogs.conf.sample );
 
 ## add program files for packing here
-my @exe_files  = qw( savelogs smalldate );
+my @exe_files  = qw( savelogs );
 
-## add pod files for packing here. They live in VERIO/
+## add pod files for packing here. They live in 'pods/'
 my %man_files = (
-		 'VERIO/rotation.pod' => 'rotation',
+		 'pods/rotation.pod'  => 'rotation',
 		 'savelogs'           => 'savelogs',
 		);
 

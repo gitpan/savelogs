@@ -14,51 +14,66 @@ IS CURRENTLY JUST A PLACEHOLDER FOR A FUTURE FAQ *
 
 =head1 DESCRIPTION
 
-Q. I don't understand the process phases (move, archive, etc.). What's
-   really going on here?
+=over 4
 
-A. read the manual.
+=item Q.
 
-Q. Can I archive just one log file on a regular basis?
+I don't understand the process phases (move, archive, etc.). What's
+really going on here?
 
-A. Sure. You have read the man page, right? You need to decide what
-   "archive" means for you. Some people think archive means to rename
-   the file and then compress it. Other people think it just means to
-   rename the file, etc.
+=item A.
 
-Q. How does savelogs behave with very low disk space?
+read the manual.
 
-A. Savelogs uses tar to archive log files and gzip to compress them.
-   If you're adding logs to an archive and then compressing that
-   archive, you must be able to guarantee this much disk space:
+=item Q.
 
-       - size of current log * 2
-       - size of archive uncompressed
+Can I archive just one log file on a regular basis?
 
-   If this is more space than you have, consider using the 'period'
-   option, which will compress a certain quantity (which you specify
-   with the 'count' option) of individual logs. While this does not
-   save as much total disk space (tar files compress slightly better
-   than individual logs because of the added redundancy of multiple
-   logs in one file), it does reduce the free disk space required to
-   save the log files because you don't have to decompress the tar
-   file before adding the log file to it.
+=item A.
 
-   You may also add the 'count' option which will limit the number of
-   logs saved. By also specifying the 'size' option and running
-   savelogs more frequently, you can get a good idea how much total
-   disk space you will need for all of your logs.
+Sure. You have read the man page, right? You need to decide what
+"archive" means for you. Some people think archive means to rename
+the file and then compress it. Other people think it just means to
+rename the file, etc.
 
-   To calculate how much log space you'll need, you can also set the
-   'size' limit so that logs only get archived if they are a minimum
-   size. This way you can know that the log size will be within a
-   certain range (you can run savelogs several times a day to get
-   finer control over the log size). Multiply that size plus that log
-   compressed (roughly 10:1) times the number of logs. For example:
+=item Q.
+
+How does savelogs behave with very low disk space?
+
+=item A.
+
+Savelogs uses B<tar> to archive log files and B<gzip> to compress
+them (unless you specify otherwise). If you're adding logs to an
+archive and then compressing that archive, you must be able to
+guarantee this much disk space:
+
+    - size of current log * 2
+    - size of archive uncompressed
+
+If this is more space than you have, consider using the 'period'
+option, which will compress a certain quantity (which you specify with
+the 'count' option) of individual logs. While this does not save as
+much total disk space (tar files compress slightly better than
+individual logs because of the added redundancy of multiple logs in
+one file), it does reduce the free disk space required to save the
+log files because you don't have to decompress the tar file before
+adding the log file to it.
+
+You may also add the 'count' option which will limit the number of
+logs saved. By also specifying the 'size' option and running savelogs
+more frequently, you can get a good idea how much total disk space
+you will need for all of your logs.
+
+To calculate how much log space you'll need, you can also set the
+'size' limit so that logs only get archived if they are a minimum
+size. This way you can know that the log size will be within a certain
+range (you can run savelogs several times a day to get finer control
+over the log size). Multiply that size plus that log compressed
+(roughly 10:1) times the number of logs. For example:
    
-       savelogs --size=500 --count=5 --period --conf=/etc/savelogs.conf
+    savelogs --size=500 --count=5 --period --conf=/etc/savelogs.conf
    
-    will yield:
+will yield:
    
     500K (approx)    log
      50K             log.0.gz
@@ -69,6 +84,27 @@ A. Savelogs uses tar to archive log files and gzip to compress them.
     ===========================
     750K             total logs
    
-    You now need roughly only 750K for your logs. Then if you limit
-    your user quotas, you can guarantee you never run out of space
-    for any reason (barring core dumps and other unforseeable acts).
+You now need roughly only 750K for your logs. Then if you limit your
+user quotas, you can guarantee you never run out of space for any
+reason (barring core dumps and other unforseeable acts).
+
+=item Q.
+
+Can I specify my own compression program?
+
+=item A.
+
+Yes. Use the B<gzip> directive to specify a path to an alternative
+compression program like B<bzip>.
+
+=item Q.
+
+Can I specify my own date format when renaming logs?
+
+=item A.
+
+As of version 1.33 you may use the B<datefmt> directive on the
+command-line or in your configuration file. B<datefmt> uses the same
+arguments as strftime(1), so read that manpage.
+
+=back

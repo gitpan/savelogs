@@ -1,5 +1,5 @@
 use Test;
-BEGIN { $| = 1; plan(tests => 35); chdir 't' if -d 't'; }
+BEGIN { $| = 1; plan(tests => 39); chdir 't' if -d 't'; }
 require 'savelogs.pl';
 
 use vars qw(
@@ -33,10 +33,12 @@ ok( $settings->{'clobber'},   	     '1' );
 ok( $settings->{'compress'},  	     'undef' );
 ok( $settings->{'config'},    	     'undef' );
 ok( $settings->{'count'},     	     '9' );
+ok( $settings->{'datefmt'},          '%y%m%d' );
 ok( $settings->{'debug'},     	     '0' );
 ok( $settings->{'dry-run'},   	     'undef' );
 ok( $settings->{'ext'},       	     'undef' );
 ok( $settings->{'filter'},    	     'undef' );
+ok( $settings->{'force-pfh'},        'undef' );
 ok( $settings->{'force-pmh'},        'undef' );
 ok( $settings->{'full-path'}, 	     'undef' );
 ok( $settings->{'gtar'},      	     'undef' );
@@ -47,7 +49,9 @@ ok( $settings->{'hourly'},    	     'undef' );
 ok( $settings->{'log'},       	     '(  )' );
 ok( $settings->{'logfile'},   	     'stdout' );
 ok( $settings->{'loglevel'},  	     '0' );
+ok( $settings->{'nolog'},            '(  )' );
 ok( $settings->{'period'},    	     'undef' );
+ok( $settings->{'postfilterhook'},   'undef' );
 ok( $settings->{'postmovehook'},     'undef' );
 ok( $settings->{'process'},          'move,compress' );
 ok( $settings->{'sep'},              '.' );

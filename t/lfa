@@ -1,0 +1,25 @@
+#!/usr/bin/perl -w
+use strict;
+
+## Scott Wiersdorf
+## Created: Tue Sep 25 10:13:09 MDT 2001
+## $Id: lfa,v 1.1 2001/09/25 16:56:17 scottw Exp $
+
+## log file analyzer
+
+my $log  = shift @ARGV;
+my $size = shift @ARGV;
+
+unless( -l $log ) {
+    warn "$log is not a symlink!\n";
+    exit 1;
+}
+print STDERR "Link ok\n";
+
+my $link = readlink($log);
+unless( $size == -s $link ) {
+    warn "$size is not the size of $link!\n";
+    exit 1;
+}
+print STDERR "Size ok\n";
+exit 0;

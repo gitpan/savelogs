@@ -1,5 +1,5 @@
 use Test;
-BEGIN { $| = 1; plan(tests => 61); chdir 't' if -d 't'; }
+BEGIN { $| = 1; plan(tests => 71); chdir 't' if -d 't'; }
 require 'savelogs.pl';
 
 use vars qw(
@@ -13,6 +13,13 @@ $bindir = '..';
 
 ## fetch default settings
 $settings = settings(`$bindir/savelogs --settings 2>&1`);
+
+## binaries
+for my $bin (qw( gzip gtar tar compress uncompress )) {
+    my $binpath = `which $bin`; chomp $binpath;
+    $settings_new = settings(`$bindir/savelogs --$bin=$binpath --settings 2>&1`);
+    ok( $settings_new->{$bin}, $binpath );
+}
 
 ## apacheconf
 $settings_new = settings(`$bindir/savelogs --apacheconf=/www/foo/httpd.conf --settings 2>&1`);
@@ -48,6 +55,10 @@ ok( $settings_new->{'count'}, '99' );
 $settings_new = settings(`$bindir/savelogs --dry-run --settings 2>&1`);
 ok( $settings_new->{'dry-run'}, '1' );
 
+## datefmt
+$settings_new = settings(`$bindir/savelogs --datefmt='%y-%m-%d' --settings 2>&1`);
+ok( $settings_new->{'datefmt'}, '%y-%m-%d' );
+
 ## ext
 $settings_new = settings(`$bindir/savelogs --ext=foo --settings 2>&1`);
 ok( $settings_new->{'ext'}, 'foo' );
@@ -56,6 +67,10 @@ ok( $settings_new->{'ext'}, 'foo' );
 $settings_new = settings(`$bindir/savelogs --filter='egrep -v "localhost" \$LOG' --settings 2>&1`);
 ok( $settings_new->{'filter'}, 'egrep -v "localhost" $LOG' );
 
+## force-pfh
+$settings_new = settings(`$bindir/savelogs --force-pfh -settings 2>&1`);
+ok( $settings_new->{'force-pfh'}, '1' );
+
 ## force-pmh
 $settings_new = settings(`$bindir/savelogs --force-pmh -settings 2>&1`);
 ok( $settings_new->{'force-pmh'}, '1' );
@@ -63,6 +78,10 @@ ok( $settings_new->{'force-pmh'}, '1' );
 ## full-path
 $settings_new = settings(`$bindir/savelogs --full-path --settings 2>&1`);
 ok( $settings_new->{'full-path'}, '1' );
+
+## gripe
+$settings_new = settings(`$bindir/savelogs --nogripe --settings 2>&1`);
+ok( $settings_new->{'gripe'}, '0' );
 
 ## hourly
 $settings_new = settings(`$bindir/savelogs --hourly --settings 2>&1`);
@@ -75,6 +94,10 @@ ok( $settings_new->{'log'}, '( /var/log/messages )' );
 ## loglevel
 $settings_new = settings(`$bindir/savelogs --loglevel=5 --settings 2>&1`);
 ok( $settings_new->{'loglevel'}, '5' );
+
+## nolog
+$settings_new = settings(`$bindir/savelogs --nolog=/var/log/messages --settings 2>&1`);
+ok( $settings_new->{'nolog'}, '( /var/log/messages )' );
 
 ## period
 $settings_new = settings(`$bindir/savelogs --period --process=all --settings 2>&1`);
@@ -99,6 +122,10 @@ ok( $settings_new->{'process'}, 'move,compress' );
 ## period + filter
 $settings_new = settings(`$bindir/savelogs --period --process=none --settings 2>&1`);
 ok( $settings_new->{'process'}, 'move,compress' );
+
+## postfilterehook
+$settings_new = settings(`$bindir/savelogs --postfilterhook='/bin/killall httpd' --settings 2>&1`);
+ok( $settings_new->{'postfilterhook'}, '/bin/killall httpd' );
 
 ## postmovehook
 $settings_new = settings(`$bindir/savelogs --postmovehook='/bin/killall httpd' --settings 2>&1`);

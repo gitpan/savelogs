@@ -1,0 +1,48 @@
+NAME
+    savelogs - Save log files
+
+SYNOPSIS
+    savelogs saves your log files in a nice way (by default).
+
+        savelogs --postmovehook='/usr/local/apache/bin/apachectl graceful' \
+                 --apacheconf=/www/conf/httpd.conf
+
+        savelogs `cat list_of_logs_to_process.txt`
+
+        savelogs --loglevel=2 /var/log/maillog /var/log/cronlog \
+                 /var/log/messages
+
+        savelogs --config=/etc/savelogs.conf
+
+        savelogs --period=15 /var/log/messages
+
+DESCRIPTION
+    savelogs is a flexible and robust log file archival system. Its
+    logic is simple: move (rename) the log file, filter data from
+    the log file, store the log file in an archive (via tar or
+    gtar), and compress the archive (via gzip or compress). After
+    successful compression, the original log file is deleted.
+
+    All of the above phases are optional. This means that you may
+    simply delete files if you wish. Or you may simply compress
+    existing log files. Or you may move files and add them to a tar
+    file but leave the tar file uncompressed, etc. You pick ;o)
+
+    savelogs has many options yet retains a high degree of dwimitude.
+
+    savelogs should run on any architecture that runs Perl 5.
+
+INSTALLATION
+    perl Makefile.PL
+    make
+    make test
+    make install
+
+AUTHOR
+    Scott Wiersdorf <scott@perlcode.org>
+
+COPYRIGHT
+    Copyright (c) 2001 Scott Wiersdorf.
+
+    This library is free software; you can redistribute it and/or
+    modify it under the same terms as Perl itself.

@@ -1,0 +1,978 @@
+## Scott Wiersdorf
+## Created: Mon Sep 10 11:05:05 MDT 2001
+## $Id: rotation.pod,v 1.6 2002/04/30 20:14:46 scottw Exp $
+##
+## print with:
+## pod2man --center="VPS Documentation" rotation.pod | groff -t \
+## -man -Tps | lpr -P<printer>
+##
+## manify with:
+## pod2man --center="VPS Documentation" rotation.pod >
+## rotation.1
+##
+## htmlify with:
+## pod2html --infile=rotation.pod --outfile=rotation.html \
+## --title="Savelogs Log File Rotation"
+
+=head1 NAME
+
+B<savelogs> - Log file rotation made easy
+
+=head1 SYNOPSIS
+
+B<savelogs> was written with log file rotation in mind. With it you
+can ensure that your account does not run out of disk space because
+of large log files. It allows you to preserve important Web traffic
+information and system data while conserving precious disk space.
+
+=head1 DESCRIPTION
+
+This document details several uses of B<savelogs> designed to meet
+specific challenges in log file rotation. Some of the examples in this
+tutorial are taken from the savelogs(1) man page.
+
+B<savelogs> was written with the axiom "make the common case fast" in
+mind. This means that assumptions were made about what most people
+want to do with their log files and that B<savelogs> was optimized to
+make the common scenarios intuitive and simple.
+
+If these assumptions are not correct for your particular need, it may
+mean that what you're trying to do could possibly be done in a better
+way, or that perhaps you should reconsider what you're trying to do.
+Equally likely, it could mean that the assumptions B<savelogs> makes
+really aren't correct after all; I'm sure the author would love to
+hear about it ;o)
+
+This document does not replace the savelogs(1) manual page. You should
+read the B<savelogs> man page thoroughly before reading this document.
+Examples in this document are for B<savelogs> version 1.32 or later
+(or as otherwise specified--version specific directives are noted).
+
+=head1 EXAMPLES
+
+The rest of this document contains a variety of examples of different
+ways to use B<savelogs>. Each example describes a problem scenario
+and then explains possible ways to solve the problem using B<savelogs>.
+
+B<savelogs> can be run from the command-line or as a cron job. Options
+may be given to B<savelogs> using a configuration file or the
+command-line. In our descriptions of problems and solutions we will
+use B<savelogs> configuration files rather than command-line options
+to control B<savelogs>'s behavior.
+
+For each solution offered, there will be a complete B<savelogs>
+configuration file given along with any command-line arguments if
+needed. If no command-line is shown (either via cron or a shell
+prompt), you should assume that the command-line is:
+
+    % savelogs --config=/path/to/savelogs.conf
+
+or a sample cron job:
+
+    5 2 * * * $HOME/usr/local/bin/savelogs --config=/path/to/savelogs.conf
+
+=head1 EXAMPLE 1: ARCHIVING SYSTEM LOGS
+
+Most core network services, log special information to the system log
+file F</var/log/messages>. B<sendmail>, B<popper>, B<imapd>, and
+B<ftpd> all write authentication and some debugging information to
+this file. This information is important to track down problems,
+compile server usage statistics, and record possible hacker attempts.
+
+Unfortunately, many people simply delete this file daily or weekly
+because of how quickly it can grow on heavily loaded servers. Some of
+these people often regret deleting their logs so quickly when a
+security incident occurs for which they need to review some of the
+information in their system log.
+
+Now we're convinced that we should keep the system log around for a
+little while. What approach should we take to preserve log files?
+
+This example will illustrate three popular methods of system log
+archival: permanent storage in separate archives, permanent storage
+in a single archive, and newsyslog(8) style rotation.
+
+=head1 Possible Solution 1: Permanent storage in separate archives
+
+We want our system log file rotated daily to preserve disk space and
+keep order; this will let us quickly find a particular log and view
+it.
+
+Create the following B<savelogs> configuration file:
+
+=head2 savelogs Configuration File
+
+    ## ==== begin savelogs-1a.conf ==== ##
+
+    ## our log file we want to rotate
+    Log    /var/log/messages
+    Touch  yes
+
+    ## ===== end savelogs-1a.conf ===== ##
+
+=head2 Solution Results
+
+Before we run B<savelogs> with the above configuration file, we might
+see something like this in our F<~/var/log> directory:
+
+    server% ls -l
+    -rw-r--r--  1 server  vuser    4455 Sep 12 08:24 messages
+
+After we run B<savelogs> with the above configuration file, we'll
+would see this in our F<~/var/log> directory:
+
+    -rw-r--r--  1 server  vuser       0 Sep 12 12:01 messages
+    -rw-r--r--  1 server  vuser    1047 Sep 12 08:24 messages.010912.gz
+
+=head2 Solution Explanation
+
+The I<Log> directive in our configuration file tells B<savelogs> which
+log to process. You may specify the I<Log> directive multiple times
+to process multiple logs.
+
+The I<Touch> directive tells B<savelogs> to execute the system
+B<touch> command which creates an empty log file. While most services
+do not require the log file to already exist before appending to it,
+it is a good habit to create empty log files since a) it does no harm
+and b) some programs will not create the log file for you and will
+not log until it is created.
+
+An alternative to this solution is to also specify the I<Ext>
+directive in the configuration file:
+
+    ## ==== begin savelogs-1b.conf ==== ##
+
+    ## our log file we want to rotate
+    Log    /var/log/messages
+    Touch  yes
+    Ext    yesterday
+
+    ## ===== end savelogs-1b.conf ===== ##
+
+which will create a file like this:
+
+    -rw-r--r--  1 server  vuser    1047 Sep 12 08:24 messages.010911.gz
+
+Notice that the date in the file extension is a day before the
+previous example's date. You may want to do this if you run
+B<savelogs> just after midnight but want the name of the archived
+log to reflect the date for which the log file contains data (instead
+of the day after).
+
+Yet another alternative is to specify a date format for the rotation.
+This gives you a lot of flexibility when renaming log files.
+
+           ## ==== begin savelogs-1c.conf ==== ##
+
+           ## our log file we want to rotate
+           Log     /var/log/messages
+           DateFmt %y-%m-%d
+
+           ## ===== end savelogs-1c.conf ===== ##
+
+which will create a file like this:
+
+    -rw-r--r--  1 server  vuser    1047 Sep 12 08:24 messages.01-09-12.gz
+
+You can see that the log extension has hyphens between year, month,
+and day as we described in our B<DateFmt> directive. You could even
+specify hours, minutes, and seconds if you wanted; all these options
+(and more!) are described in the strftime(1) man page.
+
+=head1 Possible Solution 2: Permanent storage in a single archive
+
+The previous solution is a fine solution for most uses: it's easy to
+tell which logs contain data for a given date range. Even if you ran
+B<savelogs> less often than daily (e.g., weekly or monthly) you would
+easily be able to tell which log had the data you wanted.
+
+You'll notice, however, that if you do run B<savelogs> often (e.g.,
+daily or hourly) in just a few days you'll have more logs than you
+would like to look at. You could download files to another machine
+periodically in order to reduce the sheer numbers of files to work
+with. Or you could use this next approach and store all logs in a
+compressed archive.
+
+=head2 savelogs Configuration File
+
+    ## ==== begin savelogs-1d.conf ==== ##
+
+    ## our log file we want to rotate
+    Log      /var/log/messages
+    Touch    yes
+    Process  all
+
+    ## ===== end savelogs-1d.conf ===== ##
+
+=head2 Solution Results
+
+When we run B<savelogs> with the above configuration file, we'll see
+this in our F<~/var/log> directory:
+
+    -rw-r--r--  1 server  vuser       0 Sep 12 12:01 messages
+    -rw-r--r--  1 server  vuser    1150 Sep 12 13:01 messages.tar.gz
+
+The contents of F<messages.tar.gz> is a single file:
+
+    server% gtar -ztf messages.tar.gz
+    messages.010912
+
+You may also use the I<Ext> option in your configuration file again
+if you wish the stored file to have yesterday's date instead of
+today's date (default).
+
+=head2 Solution Explanation
+
+This B<savelogs> configuration file looks a lot like our previous
+example except that we have added the I<Process> directive. The
+I<Process> directive tells B<savelogs> which I<phases> to include
+while processing logs. The B<savelogs> phases are:
+
+=over 4
+
+=item B<move>
+
+Log files are renamed to whatever you specify in the I<Ext> directive
+(which is today's date by default) during the I<move> phase.
+
+=item B<filter>
+
+The I<filter> process phase takes the recently renamed log files (or
+file) and pipes them through a command that you specify. If you don't
+specify a filter command, this phase is quietly skipped.
+
+=item B<archive>
+
+During the I<archive> phase, logs which have been renamed (and
+optionally filtered) are added to a tar archive.
+
+=item B<compress>
+
+The I<compress> phase takes logs and compresses them. If the
+I<archive> process phase was activated in this B<savelogs> session,
+the I<compress> phase will compress the archive instead of the log
+file.
+
+=item B<delete>
+
+After logs have been optionally renamed, filtered, archived, and
+compressed, the original file (or the file after it has been renamed)
+may be deleted because it now resides in an archive. This occurs
+during the I<delete> phase.
+
+=back
+
+If no I<Process> option is given, B<savelogs> uses I<move,compress>
+as its default setting.
+
+We specified I<all> for our I<Process> option; this means that
+B<savelogs> should apply all phases if they are applicable. As such,
+our log file, F<~/var/log/messages> is first renamed to
+F<~/var/log/messages.010912>. Because we did not specify a filter,
+the log file is not modified in any way after it is renamed. Then
+during the I<archive> phase, the file is added to a new B<tar>
+archive. The archive is compressed during the I<compress> phase and
+the original file, F<~/var/log/messages.010911> is deleted during the
+I<delete> phase.
+
+Now each night when B<savelogs> runs, the previous day's log file will
+be added to this single archive and compressed.
+
+=head1 Possible Solution 3: newsyslog(8) style rotation
+
+The primary drawback to using a single archive for storage is that
+you never really save space by log compression. Yes, the archive is
+compressed most of the time, but B<savelogs> is limited by the
+underlying system B<gtar> or B<tar> to modify archives. Currently,
+neither B<gtar> nor B<tar> can write to compressed tar files; they
+can only read from them.
+
+This means that before B<savelogs> can write to the compressed tar
+file, it must first decompress it, then append the new file, then
+re-compress the file. If you have many log files, this may take
+considerable disk space.
+
+This final solution involves a compromise which minimizes storage
+space requirements while maintaining only a predetermined number of
+files in the F<~/var/log> directory. The compromise is that your log
+files are not as easily indexed because the date is not stored in the
+filename.
+
+=head2 savelogs Configuration File
+
+    ## ==== begin savelogs-1e.conf ==== ##
+
+    ## our log file we want to rotate
+    Log      /var/log/messages
+    Touch    yes
+    Period   25
+
+    ## ===== end savelogs-1e.conf ===== ##
+
+=head2 Solution Results
+
+    -rw-r--r--  1 server  vuser       0 Sep 12 13:35 messages
+    -rw-r--r--  1 server  vuser    1042 Sep 12 08:24 messages.0.gz
+
+=head2 Solution Explanation
+
+If we were to run B<savelogs> with the above configuration file many
+times, you would see files like this:
+
+    -rw-r--r--  1 server  vuser    1163 Sep 16 08:24 messages.0.gz
+    -rw-r--r--  1 server  vuser    1388 Sep 15 08:24 messages.1.gz
+    -rw-r--r--  1 server  vuser    1021 Sep 14 08:24 messages.2.gz
+    -rw-r--r--  1 server  vuser    1048 Sep 13 08:24 messages.3.gz
+    -rw-r--r--  1 server  vuser    1042 Sep 12 08:24 messages.4.gz
+
+You can see that the most recent log file is named F<messages.0.gz>
+and the oldest log file has the highest number. With the I<Period>
+directive in our configuration file, we will save 25 I<periods> of
+logs. That is, if we ran B<savelogs> daily, we would have 25 days
+worth of logs stored (maximum. After 25, logs begin to "fall off" the
+end--the oldest logs are not renamed but simply clobbered by more
+recent logs). If we ran B<savelogs> hourly, we would have 25 hours
+worth of logs.
+
+This style of log rotation is called I<newsyslog-style> rotation,
+named after newsyslog(8) which is a UNIX system utility that does
+approximately the same thing.
+
+=head1 EXAMPLE 2: ARCHIVING MULTIPLE SYSTEM LOGS
+
+Now we have multiple system logs we would like to archive like we did
+in the previous example. In addition to F<~/var/log/messages> we also
+want to archive F<~/var/log/procmail> and F<~/var/mail/cron>.
+
+=head1 Possible Solution 1: an archive for each file
+
+The simplest approach is to archive each file separately. Each file
+is easily accessible and cleanly indexed with the date embedded in
+the filename.
+
+=head2 savelogs Configuration File
+
+    ## ==== begin savelogs-2a.conf ==== ##
+
+    ## our log file we want to rotate
+    Log      /var/log/messages
+    Log      /var/log/procmail
+    Log      /var/mail/cron
+    Touch    yes
+
+    ## ===== end savelogs-2a.conf ===== ##
+
+=head2 Solution Results
+
+In F<~/var/log>:
+
+    -rw-r--r--  1 server  vuser       0 Sep 12 14:19 procmail
+    -rw-r--r--  1 server  vuser     159 Sep 12 14:03 procmail.010912.gz
+    -rw-r--r--  1 server  vuser       0 Sep 12 14:19 messages
+    -rw-r--r--  1 server  vuser    1047 Sep 12 08:24 messages.010912.gz
+
+and in F<~/var/mail>:
+
+    -rw-r--r--  1 server  vuser       0 Sep 12 14:19 cron
+    -rw-r--r--  1 server  vuser      94 Sep 12 14:18 cron.010912.gz
+
+=head2 Solution Explanation
+
+Like the cases in our previous example, we create a simple
+configuration file that lists the logs we want to process. B<savelogs>
+will go through each of its phases (by default, since we didn't
+specify any I<Process> options, B<savelogs> will execute the I<move>
+and I<compress> phases) and process each log in turn.
+
+If we were to store each log file in a tar archive using the
+I<Process> directive set to I<all>, we would have three different
+compressed tar files, one for each log.
+
+=head1 Possible Solution 2: a single archive for all files
+
+Suppose we wanted these three files placed into a single archive so
+that we could download just one file periodically instead of many
+files.
+
+=head2 savelogs Configuration File
+
+    ## ==== begin savelogs-2b.conf ==== ##
+
+    ## our log file we want to rotate
+    Log      /var/log/messages
+    Log      /var/log/procmail
+    Log      /var/mail/cron
+    Touch    yes
+    Process  all
+    Archive  /var/log/logs.tar
+
+    ## ===== end savelogs-2b.conf ===== ##
+
+=head2 Solution Results
+
+The resulting file in F<~/var/log>:
+
+    -rw-r--r--  1 server  vuser   32413 Sep 12 17:16 logs.tar.gz
+
+contains our three original files:
+
+    server% gtar -ztf logs.tar.gz
+    messages.010912
+    procmail.010912
+    cron.010912
+
+=head2 Solution Explanation
+
+The primary strength of this solution is that files scattered about
+your file system are stored centrally, making downloading logs
+convenient.
+
+This solution has the same drawback, however, as the similar case in
+the previous example: the tar file must be decompressed before adding
+files to it. This solution is fine if you can guarantee that your
+total disk space is enough to handle all of the archived logs together
+in their decompressed sizes.
+
+=head1 Possible Solution 3: a single archive for all files where path information is preserved
+
+We like our single archive, but what happens if we have two files with
+the same name (e.g., F<~/var/log/cron> and F<~/var/mail/cron>)?
+B<gtar> is able to put both files in the archive, but when we extract
+them one of them is going to overwrite the other. The solution is to
+store path information with our archives.  While most people who
+post-process their log files will probably not use this technique, if
+you're saving the logs "just in case", this solution will work well.
+
+=head2 savelogs Configuration File
+
+    ## ==== begin savelogs-2c.conf ==== ##
+
+    ## our log file we want to rotate
+    Log        /var/log/messages
+    Log        /var/log/procmail
+    Log        /var/log/cron
+    Log        /var/mail/cron
+    Touch      yes
+    Process    all
+    Archive    /var/log/logs.tar
+    Full-Path  yes
+
+    ## ===== end savelogs-2c.conf ===== ##
+
+You can see that we have two files F<~/var/log/cron> and
+F<~/var/mail/cron> that will conflict inside our tar file unless we
+preserve path information.
+
+=head2 Solution Results
+
+The resulting file, like the previous case, is F<~/var/log/logs.tar.gz>:
+
+    -rw-r--r--  1 server  vuser   32471 Sep 13 13:51 logs.tar.gz
+
+contains the for log files we included in our configuration file:
+
+    server% tar -ztf logs.tar.gz 
+    var/log/messages.010913
+    var/log/procmail.010913
+    var/log/cron.010913
+    var/mail/cron.010913
+
+except the archive contains full path information, allowing us to
+store two files with the same name (F<~/var/log/cron> and
+F<~/var/mail/cron>).
+
+=head2 Solution Explanation
+
+This solution is well-suited for archiving scattered logs, some of
+which may have the same name. It is also ideal for preserving
+directory hierarchy information, as well as the actual log files
+themselves. While most people who actually perform some log analysis
+on these files may find that extracting the log files from the archive
+is cumbersome, the only other good alternative is to archive logs
+separately and download them separately.
+
+=head1 Possible Solution 4: a single archive for each directory containing logs
+
+This solution is a hybrid of the last two solutions. We don't want to
+preserve path information in our archive, but we still wish to be able
+to store files with common names. This solution takes advantage of
+one of B<savelogs> hidden features to allow us to create a single
+archive I<per-directory root>.
+
+=head2 savelogs Configuration File
+
+    ## ==== begin savelogs-2d.conf ==== ##
+    
+    ## our log file we want to rotate
+    Log        /var/log/messages
+    Log        /var/log/procmail
+    Log        /var/log/cron
+    Log        /var/mail/cron
+    Touch      yes
+    Process    all
+    Archive    logs.tar
+    
+    ## ===== end savelogs-2d.conf ===== ##
+
+We have stripped the path from the I<Archive> directive and no longer
+include the I<Full-Path> directive.
+
+=head2 Solution Results
+
+After running B<savelogs> with the above configuration file we have
+two archives, one in F<~/var/log/logs.tar.gz>:
+
+    -rw-r--r--  1 server  vuser   32337 Sep 13 14:04 logs.tar.gz
+
+whose contents are:
+
+    server% tar -ztf logs.tar.gz 
+    messages.010913
+    procmail.010913
+    cron.010913
+
+The other archive is F<~/var/mail/logs.tar.gz>:
+
+    -rw-r--r--  1 server  vuser  182 Sep 13 14:04 logs.tar.gz
+
+whose contents are:
+
+    server% tar -ztf logs.tar.gz 
+    cron.010913
+
+=head2 Solution Explanation
+
+This solution is like the previous except that instead of preserving
+path information to store files with the same name, it uses a separate
+archive for each directory root (e.g., F<~/var/log> and F<~/var/mail>).
+
+=head1 EXAMPLE 3: ROTATING APACHE LOGS
+
+Everyone, sooner or later, has to rotate Apache log files. B<savelogs>
+has a number of options to help make Apache log rotation as simple
+and efficient as possible. To accomplish this, we introduce three new
+directives: I<apacheconf>, I<apachelog>, and I<apachelogexclude>.
+
+Suppose we have all of our system log rotation under control. Now we
+have some Apache log files that are consistently eating up our disk
+space and we want to somehow keep the amount of disk space used by
+files to a minimum. Our first instinct is to add a I<Log> directive
+to our B<savelogs> configuration file for each log that we want to
+process. But after adding a few, we realize that there must be a
+better way to do this.
+
+=head1 Possible Solution 1: Automatic Logfile Detection
+
+B<savelogs> is Apache-aware. That is, it knows how to read Apache
+style configuration files and look for certain patterns. These
+patterns are treated as filenames of log files to process. If the
+I<ApacheConf> directive is specified, B<savelogs> will read the
+specified Apache configuration file and parse it for log files. Each
+log file found will be processed as if it had been specified with the
+I<Log> directive or passed on the command-line.
+
+Assume our Apache configuration file has the following directives:
+
+    TransferLog "|/usr/local/bin/logwatch /usr/local/etc/httpd/logs/access_log"
+    ErrorLog "|/usr/local/bin/logwatch /usr/local/etc/httpd/logs/error_log"
+    
+    <VirtualHost domain.name1 www.domain.name1>
+      ServerAdmin webmaster@domain.name1
+      DocumentRoot /usr/local/etc/httpd/vhosts/domain.name1
+      ServerName www.domain.name1
+      ErrorLog logs/error_log-domain.name1
+      TransferLog logs/access_log-domain.name1
+    </VirtualHost>
+    
+    <VirtualHost domain.name2 www.domain.name2>
+      ServerAdmin webmaster@domain.name2
+      DocumentRoot /usr/local/etc/httpd/vhosts/domain.name2
+      ServerName www.domain.name2
+      ErrorLog logs/error_log-domain.name2
+      TransferLog /dev/null
+    </VirtualHost>
+    
+    <VirtualHost domain.name3 www.domain.name3>
+      ServerAdmin webmaster@domain.name3
+      DocumentRoot /usr/local/etc/httpd/vhosts/domain.name3
+      ServerName www.domain.name3
+      ErrorLog logs/error_log-domain.name3
+      TransferLog logs/access_log-domain.name3
+    </VirtualHost>
+
+We have the main server I<TransferLog> and I<ErrorLog> directives and
+each of the three virtual hosts have their own I<TransferLog> and
+I<ErrorLog> directives also.
+
+=head2 savelogs Configuration File
+
+    ## ==== begin savelogs-3a.conf ==== ##
+    
+    ApacheConf  /www/conf/httpd.conf
+    PostMoveHook /usr/local/bin/restart_apache
+    
+    ## ===== end savelogs-3a.conf ===== ##
+
+=head2 Solution Results
+
+After running B<savelogs> with the above configuration file, we'll
+have in our logs directory the following files:
+
+    -rw-r--r--  1 server  vuser        0 Sep 13 23:07 access_log-domain.name1
+    -rw-r--r--  1 server  vuser     9360 Sep 13 23:06 access_log-domain.name1.010913.gz
+    -rw-r--r--  1 server  vuser        0 Sep 13 23:07 access_log-domain.name3
+    -rw-r--r--  1 server  vuser     1040 Sep 13 23:06 access_log-domain.name3.010913.gz
+    -rw-r--r--  1 server  vuser        0 Sep 13 23:07 error_log-domain.name1
+    -rw-r--r--  1 server  vuser      859 Sep 13 23:06 error_log-domain.name1.010913.gz
+    -rw-r--r--  1 server  vuser        0 Sep 13 23:07 error_log-domain.name2
+    -rw-r--r--  1 server  vuser      352 Sep 13 23:06 error_log-domain.name2.010913.gz
+    -rw-r--r--  1 server  vuser        0 Sep 13 23:07 error_log-domain.name3
+    -rw-r--r--  1 server  vuser      661 Sep 13 23:06 error_log-domain.name3.010913.gz
+
+=head2 Solution Explanation
+
+When B<savelogs> sees the I<ApacheConf> directive, it reads the given
+Apache configuration file, looking for directives that might be log
+files. B<savelogs> decides what Apache configuration directives might
+be log files with the I<ApacheLog> directive, which defaults to:
+
+    TransferLog|ErrorLog|AgentLog|RefererLog|CustomLog
+
+After finding all of the Apache lines that match the above pattern,
+lines that also match the I<ApacheLogExclude> pattern are removed from
+the list. The B<savelogs> default I<ApacheLogExclude> pattern is:
+
+    ^/dev/null$|\|
+
+(read "/dev/null OR a pipe character").
+
+Notice that our second virtual host logs its transfer log to
+F</dev/null>. B<savelogs> recognizes this and skips that log since
+trying to rotate F</dev/null> demonstrates poor taste. Also, our main
+server log files are piped through a program first:
+
+    TransferLog "|/usr/local/bin/logwatch /usr/local/etc/httpd/logs/access_log"
+    ErrorLog "|/usr/local/bin/logwatch /usr/local/etc/httpd/logs/error_log"
+
+B<savelogs> detects the pipe character and does not attempt to rotate
+these logs either. To rotate these logs, you could add them with the
+I<Log> directive to the B<savelogs> configuration file or on the
+command-line.
+
+=head1 Possible Solution 2: Automatic Logfile Detection with Exceptions
+
+We like what B<savelogs> did for us in the last solution, but we have
+an exception to make. We have this one virtual host that insists on
+doing their own log files. We want to leave their logs alone. What to
+do?
+
+=head2 savelogs Configuration File
+
+    ## ==== begin savelogs-3b.conf ==== ##
+    
+    ApacheConf  /www/conf/httpd.conf
+    NoLog       /usr/local/etc/httpd/logs/*_log-domain.name3
+    PostMoveHook /usr/local/bin/restart_apache
+    
+    ## ===== end savelogs-3b.conf ===== ##
+
+=head2 Solution Results
+
+After running B<savelogs> with the above configuration file, we'll
+have in our logs directory the following files:
+
+    -rw-r--r--  1 server  vuser        0 Sep 13 23:07 access_log-domain.name1
+    -rw-r--r--  1 server  vuser     9360 Sep 13 23:06 access_log-domain.name1.010913.gz
+    -rw-r--r--  1 server  vuser     1040 Sep 13 23:06 access_log-domain.name3
+    -rw-r--r--  1 server  vuser        0 Sep 13 23:07 error_log-domain.name1
+    -rw-r--r--  1 server  vuser      859 Sep 13 23:06 error_log-domain.name1.010913.gz
+    -rw-r--r--  1 server  vuser        0 Sep 13 23:07 error_log-domain.name2
+    -rw-r--r--  1 server  vuser      352 Sep 13 23:06 error_log-domain.name2.010913.gz
+    -rw-r--r--  1 server  vuser      661 Sep 13 23:06 error_log-domain.name3
+
+=head2 Solution Explanation
+
+The B<NoLog> directive tells B<savelogs> to skip files that match the
+pattern. We supplied '*_log-domain.name3' as our pattern. The asterisk
+follows standard shell globbing conventions (yikes! that just means
+that B<savelogs> patterns will work just like they do from your UNIX
+shell command prompt). In this case, our pattern expanded to
+F<access_log-domain.name3> and F<error_log-domain.name3>, so these
+files were removed from the list of files to process that the
+B<ApacheConf> directive made for us. B<NoLog> is new with B<savelogs>
+version 1.40.
+
+=head1 Possible Solution 3: Log File Analysis Embedding
+
+Many log file analysis programs require a I<static> and
+I<consistenly-named> log file. This means that the log file must not
+be in use by Apache (i.e., Apache is not logging to it) and the name
+of the log file must not vary from day to day (i.e., many log analysis
+programs require you to enter the name of the log file in a static
+configuration file).
+
+These two requirements are often at odds with the objectives of log
+file rotation programs. The object of a log rotation system is to
+reduce disk space use while preserving data. An additional objective
+is to locate a log quickly for a particular day. B<savelogs>' default
+behavior is to rename a log to include today's date in the filename
+and then compressing the file, achieving all three goals.
+
+In order to allow log file analysis programs the ability to have their
+cake and eat it too, without letting the log file analysis program
+rotate your logs for you (often crude and clumsy) and without forcing
+you to write complicated cron jobs to run, B<savelogs> introduces
+I<stemming>.
+
+Stemming is simply a fancy way of saying "makes a link to the freshly
+renamed log file". This link has the same name every day (or however
+often you invoke B<savelogs>) which lets you use the stem name in your
+log file analysis program. The link points to a new log each day,
+however, which means that your log file analysis program will always
+be reading current information.
+
+=head2 savelogs Configuration File
+
+You may recall that our main F<access_log> and F<error_log> files are
+piped through separate processes in the Apache configuration file, so
+they won't be found by B<savelogs>'s I<ApacheConf> directive. We use
+the I<Log> directive twice here to add them explicitly:
+
+    ## ==== begin savelogs-3c.conf ==== ##
+    
+    ApacheConf   /www/conf/httpd.conf
+    Log          /www/logs/access_log
+    Log          /www/logs/error_log
+    
+    PostMoveHook /usr/local/bin/restart_apache
+    
+    StemHook     $HOME/usr/local/urchin/urchin
+    
+    ## ===== end savelogs-3c.conf ===== ##
+
+for B<Analog>, our I<StemHook> line would look like this:
+
+    StemHook     /usr/local/bin/virtual /usr/local/analog/analog
+
+=head2 Solution Results
+
+As before, our logs have been tidily rotated. Before they were
+completely rotated, however, B<Urchin> ran and processed them.
+
+    -rw-r--r--  1 server  vuser        0 Sep 13 18:42 access_log
+    -rw-r--r--  1 server  vuser        0 Sep 13 18:42 access_log-domain.name1
+    -rw-r--r--  1 server  vuser     9360 Sep 13 18:06 access_log-domain.name1.010913.gz
+    -rw-r--r--  1 server  vuser        0 Sep 13 18:42 access_log-domain.name3
+    -rw-r--r--  1 server  vuser     1040 Sep 13 18:06 access_log-domain.name3.010913.gz
+    -rw-r--r--  1 server  vuser   274755 Sep 13 18:41 access_log.010913.gz
+    -rw-r--r--  1 server  vuser        0 Sep 13 18:42 error_log
+    -rw-r--r--  1 server  vuser        0 Sep 13 18:42 error_log-domain.name1
+    -rw-r--r--  1 server  vuser      859 Sep 13 18:06 error_log-domain.name1.010913.gz
+    -rw-r--r--  1 server  vuser        0 Sep 13 18:42 error_log-domain.name2
+    -rw-r--r--  1 server  vuser      352 Sep 13 18:06 error_log-domain.name2.010913.gz
+    -rw-r--r--  1 server  vuser        0 Sep 13 18:42 error_log-domain.name3
+    -rw-r--r--  1 server  vuser      661 Sep 13 18:06 error_log-domain.name3.010913.gz
+    -rw-r--r--  1 server  vuser   225964 Sep 13 18:38 error_log.010913.gz
+
+=head2 Solution Explanation
+
+The I<StemHook> directive works like this. We begin with a log file:
+
+    -rw-r--r--  1 server vuser  6348250 Sep 13 18:41 access_log
+
+When B<savelogs> starts up with something like this:
+
+    % savelogs --postmovehook=/usr/local/bin/restart_apache \
+               --stemhook=\$HOME/usr/local/urchin/urchin \
+               /www/logs/access_log
+
+it first detects F</www/logs/access_log> and renames it:
+
+    -rw-r--r--  1 server vuser  6348250 Sep 13 18:41 access_log.010913
+
+Any I<PostMoveHook> commands are executed at this time. In this
+example we restart Apache so that Apache will close its file
+descriptors on F</www/logs/access_log.010913> and re-open a new
+descriptor on F</www/logs/access_log>. Renaming (moving) a file will
+not necessarily close descriptors that other processes may have open
+on that file.
+
+B<savelogs> then notices that we've supplied a I<StemHook>, so it
+enters its I<stem> phase. The first thing that B<savelogs> does in
+the I<stem> phase is create a symbolic link to the recently renamed
+file. The name of the symbolic link (by default) is the name of the
+log concatenated with the string 'today'. You can change the string
+with the I<Stem> option.
+
+Now we have something like this:
+
+    -rw-r--r--  1 server vuser  6348250 Sep 13 18:41 access_log.010913
+    lrwxr-xr-x  1 server vuser       17 Sep 13 18:42 access_log.today -> access_log.010913
+
+B<savelogs> next executes the command specified in the I<StemHook>
+directive, in our case above it will run F<$HOME/usr/local/urchin/urchin>. 
+The I<$HOME> variable is a B<savelogs> internal variable that
+corresponds to your home directory. B<Urchin> should be configured
+something like this:
+
+    #RestartCommand:     /usr/local/bin/restart_apache
+    #LogDestiny:         archive
+
+    ...
+    
+    <Report>
+      ReportName:      server.com
+      ReportDirectory: /usr/home/server/usr/local/etc/httpd/htdocs/urchin/server.com/
+      TransferLog:     /usr/home/server/usr/local/etc/httpd/logs/access_log.today
+      ErrorLog:        /usr/home/server/usr/local/etc/httpd/logs/error_log.today
+    </Report>
+
+Notice that we commented out the 'restart_apache' command for
+B<Urchin>. Because we already renamed the log file and restarted
+Apache in the I<move> phase, we don't need to do it again. Further,
+we have commented out B<Urchin>'s 'LogDestiny' command: we don't want
+B<Urchin> rotating our logs or deleting our logs for us, thank you.
+
+The B<Urchin> report section has been modified to look for our I<Stem>
+files. After the I<StemHook> has run, B<savelogs> removes the links
+it created and continues on through its other phases as usual.
+
+The corresponding B<Analog> configuration file would include this line
+(other virtual host lines would follow this pattern):
+
+    LOGFILE /www/logs/access_log.today
+
+By the end of the compression phase, we have this:
+
+    -rw-r--r--  1 server vuser   274755 Sep 13 18:41 access_log.010913.gz
+
+It may be that some command you issue in I<StemHook> will not be able
+to read a symbolic link. If this is the case, you should specify the
+I<StemLink> directive with another parameter:
+
+=over 4
+
+=item B<hard>
+
+Creates a hard link to the file. This new file is indistinguishable
+from the original file. Any changes made to this new file will be
+reflected in the original file. This method requires no extra disk
+space.
+
+=item B<copy>
+
+Creates a copy of the original file. Any changes made to this new file
+will NOT be reflected in the original file. Changes will be completely
+discarded after the I<StemHook> phase has completed and the copy is
+deleted. This method requires as much extra disk space as the size of
+the original log.
+
+=back
+
+The rule of thumb is to use a hard link when the default symbolic link
+doesn't work (which is rare) and use a copy of the file if your
+I<StemHook> command makes changes to the file which you don't want to
+preserve.
+
+=head1 EXAMPLE 4: Filtering logs
+
+We do not have F<root.exe> or F<cmd.exe> on our web server and we
+never will if we have any say in matters.
+
+Nevertheless, we grow weary of our Apache log files growing out of
+control mostly due to requests for these files from a slew of new
+Windows IIS worms. When we process our logs with our favorite log
+file analysis tool, we want to get rid of these kinds of entries
+before our log file analysis tool ever gets the log. What to do?
+
+=head1 Possible Solution 1: Filtering with savelogs
+
+We can strip these bogus requests from our log files before they are
+processed. Each night we'll run our logs through a filter that will
+make them clean and free of any Windows worm requests.
+
+=head2 savelogs Configuration File
+
+    ## ==== begin savelogs-4a.conf
+
+    ApacheConf     /www/conf/httpd.conf
+    PostMoveHook   /usr/local/bin/restart_apache
+    Filter         /usr/bin/egrep -v '(root|cmd)\.exe' $LOG
+
+    ## ==== end savelogs-4a.conf
+
+=head2 Solution Results
+
+When we started, our logs looked like this:
+
+    server:~ $ ls -l
+    -rw-r--r--  1 server  vuser  278115 Jan  7 10:25 access_log
+    -rw-r--r--  1 server  vuser   34989 Jan  7 00:10 error_log
+
+If we could sneak a peek at the logs after they had been renamed and
+filtered, they'd look like this:
+
+    server:~ $ ls -l
+    -rw-r--r--  1 server  vuser  260882 Jan  7 11:00 access_log.020107
+    -rw-r--r--  1 server  vuser   18838 Jan  7 11:00 error_log.020107
+
+You can see that we stripped out 18k from the F<access_log> and about
+16k from the F<error_log>. After the entire process is complete, our
+logs look like this:
+
+    server:~ $ ls -l
+    -rw-r--r--  1 server  vuser  26807 Jan  7 11:00 access_log.020107.gz
+    -rw-r--r--  1 server  vuser   2247 Jan  7 11:00 error_log.020107.gz
+
+=head2 Solution Explanation
+
+We use the I<ApacheConf> directive to tell B<savelogs> which logs to
+process. B<savelogs> searches the file specified in I<ApacheConf> for
+log files. The I<PostMoveHook> directive restarts our Apache daemon
+after the logs have been renamed. We do this so that Apache closes
+and reopens its log files on a new log file (and stops trying to log
+to the recently renamed logs). Lastly we use the I<Filter> directive
+to remove lines with the strings 'root.exe' or 'cmd.exe' from the log.
+
+The I<Filter> directive should be a program that alters the log files
+in some way. The output of the I<Filter> command is saved to a
+temporary file which later replaces the log file itself, so be careful
+how you filter.
+
+In this specific example, we pipe our log file through egrep(1); the
+B<-v> option tells B<egrep> to exclude lines that match the pattern.
+B<$LOG> is a special B<savelogs> variable (see the savelogs(1)
+manpage) that refers to the log currently being processed.
+
+=head1 SUMMARY
+
+We have presented a few important examples which illustrate the
+abilities of the B<savelogs> program. No tutorial is complete without
+reading the original manual. Please see savelogs(1) if this
+tutorial has left you with unanswered questions.
+
+=head1 CAVEATS
+
+If you're careless you might accidentally delete logs or move logs
+somewhere you didn't want to. Make sure you run B<savelogs> with the
+I<dry-run> option enabled whenever you do experimenting, especially
+if the log data might be remotely useful.
+
+You are also encouraged to keep a log of B<savelogs> actions. See the
+I<LogLevel> and I<LogFile> directives in the savelogs(1) manual.
+
+=head1 SEE ALSO
+
+savelogs(1), cron(8), crontab(5), newsyslog(1), perl(1)
+
+=head1 AUTHOR
+
+Scott Wiersdorf, E<lt>scott@perlcode.orgE<gt>
+
+=head1 COPYRIGHT
+
+Copyright (c) 2001 Scott Wiersdorf. This document may not be
+duplicated in any form without prior written consent of the author or
+his employer.
+
+=cut

@@ -1,7 +1,121 @@
 ChangeLog for savelogs
 =============================================================================
 
+*Release 1.50*
+----------------------------
+revision 1.30
+date: 2002/12/06 23:38:10;  author: scottw;  state: Exp;  lines: +111 -40
+- allow $LOG in postmovehook and postfilterhook phases
+- regression tests for these phases
+----------------------------
+
+*Release 1.42*
+----------------------------
+revision 1.29
+date: 2002/12/06 19:28:08;  author: scottw;  state: Exp;  lines: +14 -4
+- some minor documentation changes
+----------------------------
+revision 1.28
+date: 2002/06/27 18:21:53;  author: scottw;  state: Exp;  lines: +6 -2
+- add examples of datefmt
+----------------------------
+
+*Release 1.41*
+----------------------------
+revision 1.27
+date: 2002/05/02 18:47:12;  author: scottw;  state: Exp;  lines: +35 -18
+- version 1.40 had a backward incompatibility in how it dealt with
+  empty log queues; prior to 1.40 if a log queue became empty because
+  logs were culled for size reasons, no "You must specify one or more
+  log files" warning was issued. Version 1.40 _would_ issue an error
+  regardless of how the queue was emptied because of a loop
+  optimization; this revision (1.41) restores the old behavior.
+- regression tests added to check for this warning
+----------------------------
+revision 1.26
+date: 2002/04/30 22:29:32;  author: scottw;  state: Exp;  lines: +3 -3
+- typo fixt
+----------------------------
+
+*Release 1.40*
+----------------------------
+revision 1.25
+date: 2002/04/30 20:16:56;  author: scottw;  state: Exp;  lines: +121 -64
+- added 'NoLog' directive to exclude/cull specified logs
+  * uses shell globbing like 'Log' directive
+  * smart enough to find logs based on inode (not just path) so
+    symlinked paths are ok
+  * lots of documentation (rotation.pod includes new example, too)
+  * regression tests added
+- better error handling in ApacheConf (fetch_apache_logs)
+  * handles empty/nonexistent files
+  * no more fatal exceptions in this function when absent logs
+- condensed fetch_logs and cull phases into one phase, one loop
+- added 'fulllog' data member to log object (shaves off a half-dozen
+  calls to mkpath)
+- pre-compressed file check now pre-compiled regex
+- backward compatible with all 1.x versions
+----------------------------
+
+*Release 1.33*
+----------------------------
+revision 1.24
+date: 2002/02/28 19:46:27;  author: scottw;  state: Exp;  lines: +55 -69
+- use strftime to format the date extension
+- removed 'smalldate' from the distribution
+- cleaned up some undef bugs in find_binary()
+----------------------------
+revision 1.23
+date: 2002/01/07 19:02:29;  author: scottw;  state: Exp;  lines: +3 -3
+- fixup minor pod problem
+----------------------------
+
+*Release 1.32*
+----------------------------
+revision 1.22
+date: 2002/01/07 18:22:07;  author: scottw;  state: Exp;  lines: +116 -113
+- move stem phase after filter phase so that analysis programs can
+  have post filtered logs.
+----------------------------
+revision 1.21
+date: 2002/01/03 04:43:31;  author: scottw;  state: Exp;  lines: +57 -19
+- update documentation
+----------------------------
+
+*Release 1.31*
+----------------------------
+revision 1.20
+date: 2002/01/03 03:10:30;  author: scottw;  state: Exp;  lines: +43 -4
+- added postfilterhook
+----------------------------
+
+*Release 1.30*
+----------------------------
+revision 1.19
+date: 2001/11/02 21:12:48;  author: scottw;  state: Exp;  lines: +31 -10
+- added 'nogripe' option to turn off griping when there are no logs
+----------------------------
+
+
 *Release 1.29*
+----------------------------
+revision 1.18
+date: 2001/10/24 23:38:08;  author: scottw;  state: Exp;  lines: +3 -3
+- raise globbing debug output one level
+----------------------------
+revision 1.17
+date: 2001/10/23 15:27:21;  author: scottw;  state: Exp;  lines: +4 -4
+clean license
+----------------------------
+revision 1.16
+date: 2001/10/22 16:28:03;  author: scottw;  state: Exp;  lines: +91 -13
+- globbing capability with Log directive added (uses Perl's internal
+  glob operator). Now you can do stuff like this:
+
+    Log            /www/logs/access_log.*
+
+  and savelogs will find matching logs--implicitly omitting
+  *(\.tar|\.t?gz)
 ----------------------------
 
 
