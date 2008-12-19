@@ -63,7 +63,7 @@ ok( $settings->{'size'},             'undef' );
 ok( $settings->{'stem'},             'today' );
 ok( $settings->{'stemhook'},         'undef' );
 ok( $settings->{'stemlink'},         'symbolic' );
-$bin = `which gtar tar 2>/dev/null | head -1 | grep -v 'no '`; chomp $bin; unless( $bin =~ /tar/ ) { $bin = '' }
+$bin = `which gtar tar 2>/dev/null | grep -v 'no ' | head -1`; chomp $bin; unless( $bin =~ /tar/ ) { $bin = '' }
 ok( $settings->{'tar'},              $bin );
 ok( $settings->{'touch'},            'undef' );
 $bin = `which uncompress 2>/dev/null | grep -v 'no uncompress'`; chomp $bin; unless( $bin =~ /uncompress/ ) { $bin = '' }

@@ -23,7 +23,8 @@ really going on here?
 
 =item A.
 
-read the manual.
+Read the manual. Really. There's a brief little ditty on 'phases'
+right at the top of the manual.
 
 =item Q.
 
@@ -106,5 +107,15 @@ Can I specify my own date format when renaming logs?
 As of version 1.33 you may use the B<datefmt> directive on the
 command-line or in your configuration file. B<datefmt> uses the same
 arguments as strftime(1), so read that manpage.
+
+=item Q.
+
+Any way to "group" logs with similar settings to avoid running
+savelogs so many times?
+
+=item A.
+
+As of version 1.90 you may use the B<Group> directive. See manpage for
+details.
 
 =back

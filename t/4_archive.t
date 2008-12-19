@@ -9,9 +9,13 @@ use vars qw(
             %contents
 	   );
 
-$tar    = `which gtar 2>/dev/null`; chomp $tar;
+$tar    = `which gtar 2>/dev/null | grep -v 'no '`; chomp $tar;
 unless( $tar ) {
-    $tar = `which tar 2>/dev/null`; chomp $tar;
+    $tar = `which tar 2>/dev/null | grep -v 'no '`; chomp $tar;
+}
+
+unless( $tar ) {
+    die "No tar or gtar found.\n";
 }
 
 ## test many log files in a common directory in a single archive

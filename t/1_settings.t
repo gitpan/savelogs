@@ -27,7 +27,7 @@ for my $bin (qw( gzip compress uncompress )) {
 
 ## tar and gtar are special because gtar is always preferred
 for my $bin ( qw(gtar tar) ) {
-    my $binpath = `which gtar tar 2>/dev/null | head -1 | grep -v 'no '`;
+    my $binpath = `which gtar tar 2>/dev/null | grep -v 'no ' | head -1`;
     my $arg = '';
     if( $binpath ) {
 	chomp $binpath;

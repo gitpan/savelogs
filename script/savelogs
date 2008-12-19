@@ -15,8 +15,8 @@ use vars qw($VERSION $BUILD);
 
 my $prognam = $0;
 $prognam    =~ s!^.*/([^/]+)$!$1!;
-$VERSION    = '1.81';
-$BUILD      = sprintf("%d/%02d/%02d", q$SMEId: local/savelogs/script/savelogs,v 1.12 2004/08/30 18:02:43 scottw Exp $ =~ 
+$VERSION    = '1.92';
+$BUILD      = sprintf("%d/%02d/%02d", q$Id: savelogs,v 1.5 2008/12/19 05:18:00 scott Exp $ =~
 		      m!(\d{1,4})/(\d{1,2})/(\d{1,2})!);
 
 ## logging levels; debugging levels are for displaying data values
@@ -168,7 +168,6 @@ unless( GetOptions(\%opt,
 my $WHICH      = find_which(); ## this must occur before find_binary
 my $SEQ_NO     = 0;  ## starting log sequence number
 my $SEP        = '.';
-my $EXT        = date_str('today');
 my ($GTAR, $TAR, $ZIP, $GZIP, $COMPRESS, $UNCOMPRESS);
 
 ## -- check for version -- ##
@@ -206,10 +205,14 @@ if( $opt{'config'} ) {
 ## -- parse command-line options and set defaults from it -- ##
 parse_command_line( \%config );
 
+if( scalar(@{$config{'apachehost'}}) ) {
+    $config{'have_apache_hosts'} = 1;
+}
+
 ## -- cleanup paths -- ##
 clean_home( $config{'home'} );
-clean_path( $config{'logfile'}, 
-	    $config{'archive'}, 
+clean_path( $config{'logfile'},
+	    $config{'archive'},
 	    $config{'config'},
 	    $config{'apacheconf'} );
 
@@ -255,7 +258,7 @@ DEFAULTS: {
 	elsif( $config{'process'} =~ /\bmove\b/i ) {
 	    my $tmp = shift @opts;
 	    unshift @opts, 'filter';
-	    unshift @opts, $tmp;	      
+	    unshift @opts, $tmp;
 	}
 
 	## no 'move' found: tack 'filter' to the front of the options
@@ -351,13 +354,6 @@ DEFAULTS: {
     $SEP = ( defined $config{'sep'} ? $config{'sep'} : '.' );
     debug( LEVEL1, "DEF: Separator set to '$SEP'" );
 
-    ## set the log file extension
-    $EXT = ( defined $config{'ext'} ? date_str($config{'ext'}) : date_str() );
-    if( $config{'hourly'} ) {
-	$EXT = sprintf( "%s%c", $EXT, (97+(localtime(time()))[2]) );
-    }
-    debug( LEVEL1, "DEF: Extension set to '$EXT'" );
-
     ## set the gtar binary
     $GTAR = $config{'gtar'} = find_binary($config{'gtar'}, 'gtar')
       or do {
@@ -433,17 +429,66 @@ write_log( LEVEL3, "Changed directory to '" . $config{'home'} . "'" );
 ## -- phase 0: fetch logs to process -- ##
 FETCH_LOGS:
 {
-    my @loggies;          ## list of log files
+    my @loggies    = ();  ## list of log files
     my %log_inodes = ();  ## uniqify log file list
 
+    ## fetch apachehost entries in <Group> blocks
+    ## these loggies are hashrefs, not actual log file paths
+  CHUNK_HOST: {
+        ## $config{log_chunks}->[0] = { period => 3, apachehost => [ 'foo.com', 'bar.com' ] }
+        my @chunks = grep { $_->{apachehost} && scalar(@{$_->{apachehost}}) } @{$config{log_chunks}};
+        last CHUNK_HOST unless @chunks;
+
+        ## multiple logs per host: access, error, rewrite, etc.
+        my @chunk_hosts = map { @{$_->{apachehost}} } @chunks;  ## (foo.com, bar.com, etc.)
+        my @apache_logs = fetch_apache_logs( $config{'apacheconf'}, @chunk_hosts );
+
+        my $host_logs = shift @apache_logs;                ## this has our host => [log, log] map
+
+        my @host_logs = ();
+        for my $chunk ( @chunks ) {                        ## a chunk is currently the all the <Group> directives
+            for my $host ( @{$chunk->{apachehost}} ) {     ## for each host that these settings apply to...
+                for my $log ( @{$host_logs->{$host}} ) {   ## make an entry for each of this host's logs
+                    my %h_log = %$chunk;                   ## copying all the settings of the <Group> chunk
+                    $h_log{log} = $log;                    ## and make an entry for the logfile itself
+                    push @host_logs, \%h_log;              ## added to @loggies later
+                }
+            }
+        }
+
+        push @loggies, @host_logs;
+    }
+
+    ## fetch logs in <Group> blocks
+    ## these loggies are hashrefs, not actual log file paths
+  CHUNK_LOGS: {
+        ## $config{log_chunks}->[0] = { period => 3, log => [ '/var/log/foo', '/var/log/bar' ] }
+        my @chunks = grep { $_->{log} && scalar(@{$_->{log}}) } @{$config{log_chunks}};
+        last CHUNK_LOGS unless @chunks;
+
+        ## do regex expansion for each chunk and add those to the chunk settings
+        for my $chunk ( @chunks ) {
+            my @chunk_logs = regex_expand( @{$chunk->{log}} );
+            for my $log ( @chunk_logs ) {
+                my %ch_log = %$chunk;
+                $ch_log{log} = $log;
+                push @loggies, \%ch_log;
+            }
+        }
+    }
+
     ## fetch logs from apacheconf directive
-    @loggies = fetch_apache_logs( $config{'apacheconf'}, @{$config{'apachehost'}} );
+  DO_GET_LOGS: {
+        my @apache_logs = fetch_apache_logs( $config{'apacheconf'}, @{$config{'apachehost'}} );
+        shift @apache_logs;  ## throw away the host => log mapping
+        push @loggies, @apache_logs;
 
-    ## fetch log directives (internal regex expansion)
-    push @loggies, regex_expand(@{$config{'log'}});
+        ## fetch log directives (internal regex expansion)
+        push @loggies, regex_expand(@{$config{'log'}});
 
-    ## now push any logs from the command-line (command-line globbing)
-    push @loggies, @ARGV;
+        ## now push any logs from the command-line (command-line globbing)
+        push @loggies, @ARGV;
+    }
 
     ## fetch nologs directives
     my %nolog = map { make_log_entry($_)->{'fulllog'} => 1 } regex_expand(@{$config{'nolog'}});
@@ -451,6 +496,20 @@ FETCH_LOGS:
 
     ## make log entries (our own special internal data structure)
     for my $log ( @loggies ) {
+        my $log_entry;
+        ## we have a special kind of log here, with baggage already
+        ## set. These kind came from the <Group> chunks above.
+        if( ref($log) ) {
+            if( $log->{disabled} ) {
+                $config{'gripe'} = 0;  ## no complaining about disabled logs
+                next;
+            }
+
+            $log_entry = $log;
+            $log = $log_entry->{log};
+            next unless $log;
+        }
+
 	my $full_log = $config{'home'} . $log;
 	debug( LEVEL1, "P0: Creating log entry for '$log'" );
 	my $inode = (lstat($full_log))[1]
@@ -472,7 +531,7 @@ FETCH_LOGS:
 	}
 
 	## save this log with special path information
-	my $log_entry = make_log_entry($log);
+	$log_entry = make_log_entry( $log_entry ? $log_entry : $log);
 
 	## make sure log is regular file
 	unless( -f $log_entry->{'fulllog'} ) {
@@ -540,24 +599,62 @@ MOVE:
 
 	write_log( LEVEL4, "Entering move logs phase" );
 
+        my $default_ext = ( defined $config{'ext'} ? date_str($config{'ext'}) : date_str('today') );
+
 	for my $log ( @logs ) {
 	    next unless $log;
 
+            my $period = (exists $log->{period}
+                          ? $log->{period}
+                          : ( exists $config{period}
+                              ? $config{period}
+                              : undef));
+
+            ## FIXME: the *intent* of originally setting $EXT at the
+            ## start of the script was to make sure that all logs
+            ## would be renamed the same at the end of the day. By
+            ## allowing Ext and DateFmt in the <Group> blocks, we
+            ## delay that calculation out until now, which *could*
+            ## cause in rare cases a differing EXT from log to log.
+            ##
+            ## The fix for that would be to make those calculations
+            ## outside of this loop. This bug will only be introduced
+            ## for <Group> blocks, since the default (non-Group) way
+            ## still works as it used to.
+
 	    ## no period renaming (normal)
-	    unless( defined $config{'period'} ) {
+	    if( ! defined $period ) {
 		my $src = $log->{'fulllog'};
-		my $dst = $src . $SEP . $EXT;
+                my $sep = exists $log->{'sep'} ? $log->{'sep'} : $SEP;
+                my $ext = exists $log->{'ext'} ? $log->{'ext'} : undef;
+                $ext = ( $ext
+                         ? ( exists $log->{'datefmt'}
+                             ? date_str($ext, $log->{'datefmt'})
+                             : date_str($ext) )
+                         : ( exists $log->{'datefmt'}
+                             ? date_str('today', $log->{'datefmt'})
+                             : $default_ext )
+                       );
+
+                if( exists $log->{'hourly'} ? $log->{'hourly'} : $config{'hourly'} ) {
+                    $ext = sprintf( "%s%c", $ext, (97+(localtime(time()))[2]) );
+                }
+		my $dst = $src . $sep . $ext;
 
 		unless( do_rename( $src, $dst ) ) {
 		    undef $log;
 		    next;
 		}
+
+                ## update internal log information
+                $log->{'archive'} = $log->{'newlog'} = $log->{'log'} . $sep . $ext;
+                $log->{'archpath'} = $log->{'newlogpath'} = $log->{'logpath'};
 	    }
 
 	    ## do period renaming, if needed and able
 	    else {
 		$SEP = '.';
-		$EXT = '0';
+		my $ext = '0';
 
 		## a small data structure about this log:
 		## logpath: path to log
@@ -565,12 +662,19 @@ MOVE:
 		## sep:     separator between log and extension
 		## ext:     extension
 		## comp:    compression extension
-		my %log_arg = ( 'logpath' => $log->{'logpath'}, 
+                my $count = ( defined $log->{'period'}
+                              ? ( $log->{'period'} > 0 ? $log->{'period'} - 1 : 0 )
+                              : ( defined $log->{'count'}
+                                  ? ( $log->{'count'} > 0 ? $log->{'count'} - 1 : 0 )
+                                  : $config{'count'} ) );
+
+		my %log_arg = ( 'logpath' => $log->{'logpath'},
 				'log'     => $log->{'log'},
-				'sep'     => $SEP, 
+				'sep'     => $SEP,
 				'src_ext' => undef,
-				'dst_ext' => $EXT,
+				'dst_ext' => $ext,
 				'cmp_ext' => undef,
+                                'count'   => $count,
 			      );
 
 		## move the logs
@@ -578,15 +682,15 @@ MOVE:
 		    undef $log;
 		    next;
 		}
+
+                ## update internal log information
+                $log->{'archive'} = $log->{'newlog'} = $log->{'log'} . $SEP . $ext;
+                $log->{'archpath'} = $log->{'newlogpath'} = $log->{'logpath'};
 	    }
 
-	    ## update internal log information
-	    $log->{'archive'} = $log->{'newlog'} = $log->{'log'} . $SEP . $EXT;
-	    $log->{'archpath'} = $log->{'newlogpath'} = $log->{'logpath'};
-
 	    ## touch old log file if needed
-	    if( $config{'touch'} ) {
-
+            my $touch = ( exists $log->{'touch'} ? $log->{'touch'} : $config{'touch'} );
+	    if( $touch ) {
 		my $file = $log->{'fulllog'};
 		write_log( LEVEL4, "Touching '$file'" );
 		unless( $config{'dry-run'} ) {
@@ -668,29 +772,29 @@ POSTMOVEHOOK:
 ## -- chown/chmod fixups -- ##
 CHOWN:
 {
-    last CHOWN unless $config{'chown'};
-    write_log( LEVEL4, "Entering chown block" );
-    my($uid, $gid) = split(':', $config{'chown'});
-    $uid = ($uid !~ /^\d+$/
-	    ? ($uid eq '' ? -1 : (defined getpwnam($uid) ? getpwnam($uid) : -1) )
-	    : $uid );
-    $gid = ($gid !~ /^\d+$/
-	    ? ($gid eq '' ? -1 : (defined getgrnam($gid) ? getgrnam($gid) : -1) )
-	    : $gid );
-    write_log( LEVEL5, "Chowning logs to $uid:$gid");
-    my $cnt = chown $uid, $gid, map { mkpath($_->{'newlogpath'}, $_->{'newlog'}) } @logs;
-    debug( LEVEL1, "CHOWN: $cnt of " . scalar(@logs) . " successfully chowned" );
-    write_log( LEVEL3, "Exiting chown block" );
-}
+    write_log( LEVEL4, "Entering chown/chmod block" );
 
-CHMOD:
-{
-    last CHMOD unless $config{'chmod'};
-    write_log( LEVEL4, "Entering chmod block" );
-    write_log( LEVEL5, "Chmoding files to $config{'chmod'}");
-    my $cnt = chmod oct($config{'chmod'}), map { mkpath($_->{'newlogpath'}, $_->{'newlog'}) } @logs;
-    debug( LEVEL1, "CHMOD: $cnt of " . scalar(@logs) . " successfully chmoded" );
-    write_log( LEVEL3, "Exiting chmod block" );
+    for my $log ( @logs ) {
+        my $log_name = mkpath($log->{'newlogpath'}, $log->{'newlog'});
+
+        if( my $chown = (exists $log->{chown} ? $log->{chown} : $config{chown}) ) {
+            my($uid, $gid) = split(':', $chown);
+            $uid = ($uid !~ /^\d+$/
+                    ? ($uid eq '' ? -1 : (defined getpwnam($uid) ? getpwnam($uid) : -1) )
+                    : $uid );
+            $gid = ($gid !~ /^\d+$/
+                    ? ($gid eq '' ? -1 : (defined getgrnam($gid) ? getgrnam($gid) : -1) )
+                    : $gid );
+
+            write_log( LEVEL5, "Chowning '$log_name' to $uid:$gid");
+            chown $uid, $gid, $log_name;
+        }
+
+        if( my $chmod = (exists $log->{chmod} ? $log->{chmod} : $config{chmod}) ) {
+            write_log( LEVEL5, "Chmoding '$log_name' to $chmod");
+            chmod oct($chmod), $log_name;
+        }
+    }
 }
 
 ## -- phase 2: filter logs -- ##
@@ -739,7 +843,7 @@ FILTER:
 	    my $logfile = mkpath($log->{'newlogpath'}, $log->{'newlog'});
 	    $filter =~ s/\$LOG/$logfile/g;
 	    debug( LEVEL1, "P2: \$filter set to '$filter'" );
-	    
+
 	    write_log( LEVEL4, "Filtering '$logfile' through '$filter'" );
 	    unless( $config{'dry-run'} ) {
 
@@ -754,10 +858,11 @@ FILTER:
 		open( FILTER, "$filter|" )
 		  or do {
 		      write_log( LEVEL1, "Couldn't open filter '$filter': $!\n" );
-		      next;				 
+		      next;
 		  };
 
 		## filter it
+                local $_;
 		while( <FILTER> ) {
 		    print TMP;
 		}
@@ -988,9 +1093,9 @@ ARCHIVE:
 	    ## (versus in the move phase) in case the user skips the
 	    ## archive phase (this phase). Otherwise, the compression
 	    ## phase will get the wrong name.
-	    $log->{'archive'}    = ( $config{'archive'} 
-				     ? basename($config{'archive'})
-				     : $log->{'log'} . '.tar' );
+	    $log->{'archive'}    = ( $config{'archive'}
+                                     ? basename($config{'archive'})
+                                     : $log->{'log'} . '.tar' );
 	    debug( LEVEL1, "P3: \$log->{'archive'} set to '" . $log->{'archive'} . "'" );
 
 	    ## if $config{'archive'} has path information, we take that
@@ -1270,7 +1375,8 @@ COMPRESS:
 	    ## at this point we know we have an archive to compress:
 	    ## either a tar file or a plain log file
 	    my @cmd = ( $ZIP );
-	    push @cmd, '-f' if $config{'clobber'};
+            my $clobber = ( exists $log->{clobber} ? $log->{clobber} : $config{clobber} );
+	    push @cmd, '-f' if $clobber;
 	    push @cmd, $archive;
 
 	    write_log( LEVEL4, "Compressing '$archive'" );
@@ -1470,6 +1576,16 @@ sub parse_config {
 	next if /^[#;]/;  	## skip comments
 	next if /^\s*$/;        ## skip empty lines
 
+        ## each <Group> directive needs to be treated as a separate
+        ## config file and its settings stored into a single new
+        ## key of %config
+        if( m{\s*<Group>}i ) {
+            $$config{log_chunks} ||= [];
+            my $chunk = parse_log_chunk($config, \*CONFIG);
+            push @{ $$config{log_chunks} }, $chunk;
+            next;
+        }
+
 	## some whitespace (optional), a directive, some
 	## whitespace, a value, some whitespace (optional)
 	unless( m/^\s*(\S+)\s+(.+)\s*$/ ) {
@@ -1481,6 +1597,8 @@ sub parse_config {
 	my $value     = $2;
 
 	## normalize boolean values
+        ## FIXME: outstanding bug: "Period No" in a config file
+        ## FIXME: becomes "Period => 0", which is different.
 	my $newval    = ( $value =~ /^(?:false|no|off|undef|nope|0)$/i
 			  ? 0
 			  : $value );
@@ -1511,6 +1629,46 @@ sub parse_config {
     close CONFIG;
 
     return 1;
+}
+
+sub parse_log_chunk {
+    my $config = shift;
+    my $fh = shift;
+
+    my %chunk = ();
+    local $_;
+    while( <$fh> ) {
+        next if /^[#;]/;       ## skip comments
+        next if /^\s*$/;       ## skip empty lines
+        return \%chunk if m{^\s*</Group>}i;
+        next unless m/^\s*(\S+)\s+(.+)\s*$/;
+
+	my $directive = lc($1);
+	my $value     = $2;
+
+        ## 'disabled' is a Group-specific directive
+	next unless exists $$config{$directive} or $directive eq 'disabled';
+
+	my $newval = ( $value =~ /^(?:false|no|off|undef|nope|0)$/i  ? 0 : $value );
+	$newval    = ( $newval =~ /^(?:true|yes|on|defined|yup|1)$/i ? 1 : $newval );
+
+	if( 'ARRAY' eq ref $$config{$directive} ) {
+            $chunk{$directive} ||= [];
+            push @{ $chunk{$directive} }, $newval;
+	}
+
+	else {
+            $chunk{$directive} = $newval;
+	}
+
+        if( $directive eq 'apachehost' ) {
+            if( scalar(@{$chunk{$directive}}) ) {
+                $config{'have_apache_hosts'} = 1;
+            }
+        }
+    }
+
+    return {};  ## throw away incomplete <Group> chunks
 }
 
 ## read in config file, if any; then override settings with
@@ -1546,8 +1704,8 @@ APACHE_CONF: {
     my @conf = ();
     my %conf = ();
     my $server_root;
+    my %host_logs = ();
 
-## FIXME: need to test this 
     sub fetch_apache_logs {
 	my $httpd_conf = shift;  ## should be relative to $config{home} and leading slash stripped
 	my %hosts      = map { $_ => 1 } @_;     ## hosts to look for
@@ -1580,7 +1738,10 @@ APACHE_CONF: {
 		    my @dirs = map { $httpd_conf . '/' . $_ } grep { !/^\.\.?$/ } readdir DIR;
 		    closedir DIR;
 
-		    push @logs, fetch_apache_logs($_, (keys %hosts ? keys %hosts : ())) for @dirs;
+                    for my $dir ( @dirs ) {
+                        my($host_logs, @new_logs) = fetch_apache_logs($dir, (keys %hosts ? keys %hosts : ()));
+                        push @logs, @new_logs;
+                    }
 		    last FIND_LOGS;
 		}
 
@@ -1588,7 +1749,10 @@ APACHE_CONF: {
 		my @glob_conf = grep { s!^$config{'home'}!! } glob $config{'home'} . $httpd_conf;
 		if( scalar @glob_conf > 1 ) {
 		    debug( LEVEL1, "Found " . scalar @glob_conf . " config files from glob '$httpd_conf'" );
-		    push @logs, fetch_apache_logs($_, (keys %hosts ? keys %hosts : ())) for @glob_conf;
+                    for my $glob ( @glob_conf ) {
+                        my ($host_logs, @new_logs) = fetch_apache_logs($glob, (keys %hosts ? keys %hosts : ()));
+                        push @logs, @new_logs;
+                    }
 		    last FIND_LOGS;
 		}
 	    }
@@ -1664,6 +1828,7 @@ APACHE_CONF: {
 	    my $host_state = 0;
 	    my @host_logs  = ();
 	    seek $HTTPD, 0, 0;
+            local $_;
 	  LINE: while( <$HTTPD> ) {
 		## skip comments
 		next LINE if /^\#/;            ## escape needed for emacs happiness
@@ -1679,7 +1844,8 @@ APACHE_CONF: {
 		    }
 
 		    debug( LEVEL1, "Recursively searching '$include' now..." );
-		    push @logs, fetch_apache_logs($include, (keys %hosts ? keys %hosts : ()));
+                    my ($host_logs, @new_logs) = fetch_apache_logs($include, (keys %hosts ? keys %hosts : ()));
+                    push @logs, @new_logs;
 		    next LINE;
 		}
 
@@ -1687,7 +1853,7 @@ APACHE_CONF: {
 		## virtualhost logs. We don't do the server's logs either.
 		## This is a small state machine.
 	      APACHE_HOST: {
-		    last APACHE_HOST unless ref($config{'apachehost'}) && @{$config{'apachehost'}};
+                    last APACHE_HOST unless $config{'have_apache_hosts'};
 
 		    if( /^\s*<VirtualHost/i ) {
 			$host_state = 1;
@@ -1695,7 +1861,7 @@ APACHE_CONF: {
 		    }
 
 		    if( m!^\s*</VirtualHost>!i ) {
-			if( $host_state == 2 ) {  ## we found our hostname
+			if( $host_state && $host_state ne 1 ) {  ## we found our hostname
 			    for my $log_entry ( @host_logs ) {
 				## skip excluded patterns
 				if( $config{'apachelogexclude'} ) {
@@ -1706,8 +1872,10 @@ APACHE_CONF: {
 				}
 
 				## found a log entry
+                                $host_logs{$host_state} ||= [];
+                                push @{$host_logs{$host_state}}, $log_entry;
 				push @logs, $log_entry;
-				debug( LEVEL1, "Found host '$log_entry' in '$httpd_conf'" );
+				debug( LEVEL1, "Found host '$log_entry' for '$host_state' in '$httpd_conf'" );
 			    }
 			}
 			@host_logs = ();
@@ -1721,9 +1889,11 @@ APACHE_CONF: {
 			    push @host_logs, $1;
 			}
 
-			if( $host_state == 1 && /^\s*Server(?:Name|Alias)\s+(.*)/ ) {
+                        ## we need to tie this to the log
+			if( $host_state eq 1 && /^\s*Server(?:Name|Alias)\s+(.*)/ ) {
 			    if( $hosts{$1} ) {
-				$host_state = 2;
+#				$host_state = 2;
+                                $host_state = $1;
 				next LINE;
 			    }
 			}
@@ -1752,7 +1922,7 @@ APACHE_CONF: {
 
 		## found a log entry
 		push @logs, $log_entry;
-		debug( LEVEL1, "Found '$log_entry' in '$httpd_conf'" );
+		debug( LEVEL1, "Found '$log_entry' (server) in '$httpd_conf'" );
 	    }
 	    close $HTTPD;
 
@@ -1766,8 +1936,17 @@ APACHE_CONF: {
 		}
 	    }
 	}
-	return @logs;
-#	return map { ( m!^/! ? $_ : $server_root . $_ ) } @logs;
+
+        ## process the host_logs
+        for my $host ( keys %host_logs ) {
+            for my $log ( @{ $host_logs{$host} } ) {
+                next if $log =~ m!^/!;
+                next if $log =~ m!^$server_root!;
+                $log = $server_root . $log;
+            }
+        }
+
+	return (\%host_logs, @logs);
     }
 
 } ## APACHE_CONF;
@@ -1780,6 +1959,11 @@ sub make_log_entry {
     my $log = shift;
 
     my %entry = ();
+    if( ref($log) ) {
+        %entry = %$log;
+        $log = $log->{log};
+    }
+
     $entry{'sequence'}   = ++$SEQ_NO;
 
     ## set log paths (the name and location of the log)
@@ -1814,7 +1998,6 @@ sub regex_expand {
 	## return a list of globbed files with home stripped off
 	my @globbed = grep{ s!^$config{'home'}!! } glob $config{'home'} . $regex;
 
-	## 
 	for my $globbed ( @globbed ) {
 	    ## skip globs
 	    if( $globbed =~ /\.(?:tar|t?gz)$/io ) {
@@ -1831,7 +2014,8 @@ sub regex_expand {
 }
 
 sub date_str {
-    my $date = shift || 'today';
+    my $date = shift;
+    my $fmt  = shift || $config{'datefmt'};
     use constant DAY_SECS => 60 * 60 * 24;
 
     ## today's date
@@ -1849,7 +2033,7 @@ sub date_str {
 	return $date;
     }
 
-    return POSIX::strftime( $config{'datefmt'}, localtime($date) );
+    return POSIX::strftime( $fmt, localtime($date) );
 }
 
 sub find_binary {
@@ -1920,7 +2104,7 @@ sub period_log {
 
 	## $dst exists as a plain log
 	if( -f $dst ) {
-	    if( $log{'dst_ext'} == $config{'count'} ) {
+	    if( $log{'dst_ext'} == $log{count} ) {
 		return do_rename( $src, $dst );
 	    }
 
@@ -1933,7 +2117,7 @@ sub period_log {
 
 	## $dst exists as a gzip'd log
 	elsif( -f "$dst.gz" ) {
-	    if( $log{'dst_ext'} == $config{'count'} ) {
+	    if( $log{'dst_ext'} == $log{count} ) {
 		return do_rename( $src, $dst );
 	    }
 
@@ -1947,7 +2131,7 @@ sub period_log {
 
 	## $dst exists as a compress'd log
 	elsif( -f "$dst.Z" ) {
-	    if( $log{'dst_ext'} == $config{'count'} ) {
+	    if( $log{'dst_ext'} == $log{count} ) {
 		return do_rename( $src, $dst );
 	    }
 
@@ -2095,6 +2279,13 @@ sub usage {
 	print $msg, "\n";
 	print "\n";
     }
+
+    print <<_USAGE_;
+usage: $prognam [--options] [log1 .. logn]
+
+see savelogs(1) for details.
+_USAGE_
+exit;
 
     print <<_USAGE_;
 usage: $prognam [--options] [log1 .. logn]
@@ -2854,6 +3045,88 @@ or in your configuration file:
     ApacheInclude yes
 
 =back
+
+=head2 Grouping Log File Directives
+
+Beginning with B<savelogs> version 1.90, you can apply directives to
+groups of log files with the I<E<lt>GroupE<gt>> directive in a
+B<savelogs> configuration file (the directive has no command-line
+equivalent). The following directives apply in a I<Group> block:
+
+  period, ext, sep, datefmt, hourly, touch, chown, chmod, clobber, apachehost, log, disabled
+
+As of version 1.90, the following directives are not honored, but may
+be at some point in the future:
+
+  size, filter, stem, stemhook, stemlink, nolog, apachelog, apachelogexclude
+
+I<Group> settings override any other settings found in the file, but
+are applied only to log files found within the I<Group> block.
+
+Example:
+
+    ApacheConf     /www/conf/httpd.conf
+    PostMoveHook   apachectl restart
+    Period         30
+
+    <Group>
+      ApacheHost  www.sample1.tld
+      ApacheHost  www.sample2.tld
+      Period      10
+      Chown       roger:staff
+    </Group>
+
+    <Group>
+      ApacheHost www.sample3.tld
+      ApacheHost www.sample4.tld
+      Chown      fonzie
+    </Group>
+
+Explanation:
+
+The first I<Group> block will rotate Apache logs for C<sample1.tld>
+and C<sample2.tld>, but it will only rotate 10 days worth of logs,
+since the I<Period> directive inside the block is set to 10.
+
+The second I<Group> block will rotate Apache logs for C<sample3.tld>
+and C<sample4.tld>, and the full 30 day I<Period> setting will apply
+to them.
+
+Both groups will search F</www/conf/httpd.conf> and restart with
+C<apachectl restart>.
+
+I<Group> blocks have a special directive I<Disabled> that when set to
+true, will skip this block. Griping is also disabled when I<Disabled>
+is set to true:
+
+  ## this group will be completely skipped.
+  <Group>
+    Disabled         1
+    ApacheHost       www.foo.com
+    Chown            roberto
+  </Group>
+
+The purpose of the I<Disabled> directive is to prevent I<ApacheConf>
+from reverting to its behavior in the absence of any I<ApacheHost>
+directives (i.e., it will parse the entire configuration file and
+process B<all> hosts found). If this is what you desire, then remove
+or comment out your I<Group> blocks instead of I<Disabled>'ing them.
+
+Known bugs related to the I<Group> directive as of 1.91:
+
+If a log file name found inside of a I<Group> block also matches a
+I<NoLog> directive outside of the I<Group> block, it will be skipped
+as if it were outside the block.
+
+If a log referenced inside of a I<Group> block is processed outside of
+it also (found by some other directive, for example), the first one
+found will have precedence and the settings inside the I<Group> block
+may be ignored.
+
+If there are many files being processed, it is possible that in rare
+circumstances (namely, when processing spans midnight) that one set of
+logs may be named using one date and another set using another
+date. This only applies to non-periodic rotation.
 
 =head2 Moving (Renaming) Files
 

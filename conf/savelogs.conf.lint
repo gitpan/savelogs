@@ -1,7 +1,7 @@
 ## This is a sample savelogs.conf which should be suitable for most
 ## uses on the VPS
 ##
-## $Id: savelogs.conf.sample.PL,v 1.3 2001/09/06 20:43:18 scottw Exp $
+## $Id: savelogs.conf.lint,v 1.2 2008/11/29 16:03:18 scott Exp $
 ##
 ## Settings in this file generally have been set to their
 ## corresponding savelogs internal defaults
@@ -123,3 +123,16 @@ Full-Path               no
 #Log                     /var/log/messages
 #Log                     /var/log/proftpd
 #Log                     /var/log/ace
+
+## the <Group> directive applies savelogs settings to a group of log
+## files:
+#<Group>
+#  ApacheHost      baz.tld
+#  ApacheHost      blech.tld
+#  Log             /var/log/mrs_gravy
+#  Log             /var/log/mr_downspout
+#
+#  Chown           timmy
+#  Chmod           0400
+#  Touch           yes
+#</Group>

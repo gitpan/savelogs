@@ -69,7 +69,6 @@ system( "$savelogs --home=. --process=move --hourly $log1" );
 	unlink "$log1.$date_ext";
 }
 
-
 ## -- period tests -- ##
 ## make a log
 $log1 = make_log(1024);
@@ -173,7 +172,8 @@ ok( -f "$log2.bar" ); unlink( "$log2.bar" );
 $log1 = make_log(1024, 'test_log.0.gz');
 $log2 = make_log(1024, 'test_log.1.gz');
 $garbage = `$savelogs --home=. --process=move --ext='bar' --log='test_log*' 2>&1`;
-## this may fail if previous tests didn't clean up their own test_log* files
+## this may fail if previous tests didn't clean up their own test_log*
+## files. Try 'rm t/test_log*' and test again
 ok( $garbage =~ /You must specify one or more log files/ );
 ok( -f $log1 ); unlink( $log1 );
 ok( -f $log2 ); unlink( $log2 );
@@ -233,7 +233,6 @@ ok( -s _, 0 );
 unlink $log1;
 unlink "$log1.bar";
 
-
 ## -- stem stuff -- ##
 $log1 = make_log(1024);
 system("$savelogs --home=. --process=move --stemhook='\$HOME/lfa $log1.today 1024' $log1");
@@ -271,15 +270,22 @@ $return = `grep y $log3.${date_ext}z`;
 ok( $return =~ /^y{1024}$/ );
 unlink "$log3.${date_ext}z";
 
-
 ## -- chown/chmod -- ##
 $log1 = make_log(1024);
 chmod 0600, $log1;
 chown 101, 101, $log1;
-system("$savelogs --home=. --process=move --chown=1:1 --chmod=0751 $log1");
-ok( ((stat("$log1.$date_ext"))[2] & 07777), 0751 );
-ok( (stat(_))[4], 1 );
-ok( (stat(_))[5], 1 );
+if( (stat(_))[4] == 101 ) {  ## make sure we can chown
+    system("$savelogs --home=. --process=move --chown=1:1 --chmod=0751 $log1");
+    ok( ((stat("$log1.$date_ext"))[2] & 07777), 0751 );
+    ok( (stat(_))[4], 1 );
+    ok( (stat(_))[5], 1 );
+}
+else {
+    ok(1);
+    ok(1);
+    ok(1);
+}
 unlink "$log1.$date_ext";
+unlink "$log1";
 
 exit;

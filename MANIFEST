@@ -31,8 +31,14 @@ t/conf/savelogs-2c.conf
 t/conf/savelogs-2d.conf
 t/conf/savelogs-3a.conf
 t/conf/savelogs-3b.conf
+t/conf/savelogs-4a.conf
+t/conf/savelogs-5a.conf
+t/conf/savelogs-5b.conf
+t/conf/savelogs-5c.conf
+t/conf/savelogs-5d.conf
 t/lfa
 t/logs/access_log
 t/logs/error_log
 t/logs/messages
 t/savelogs.pl
+META.yml                                 Module meta-data (added by MakeMaker)
