@@ -1,6 +1,20 @@
 ChangeLog for savelogs
 =============================================================================
 
+*Release 1.94*
+----------------------------
+revision 1.7
+date: 2010/01/12 17:21:48;  author: scott;  state: Exp;  lines: +11 -11
+- dry-run documentation clarifications
+----------------------------
+
+
+*Release 1.93*
+----------------------------
+revision 1.6
+date: 2009/04/01 00:42:18;  author: scott;  state: Exp;  lines: +4 -2
+- clean up a warning when the chown value doesn't have ':'
+
 *Release 1.92*
 ----------------------------
 revision 1.5

@@ -15,8 +15,8 @@ use vars qw($VERSION $BUILD);
 
 my $prognam = $0;
 $prognam    =~ s!^.*/([^/]+)$!$1!;
-$VERSION    = '1.92';
-$BUILD      = sprintf("%d/%02d/%02d", q$Id: savelogs,v 1.5 2008/12/19 05:18:00 scott Exp $ =~
+$VERSION    = '1.94';
+$BUILD      = sprintf("%d/%02d/%02d", q$Id: savelogs,v 1.7 2010/01/12 17:21:48 scott Exp $ =~
 		      m!(\d{1,4})/(\d{1,2})/(\d{1,2})!);
 
 ## logging levels; debugging levels are for displaying data values
@@ -779,9 +779,11 @@ CHOWN:
 
         if( my $chown = (exists $log->{chown} ? $log->{chown} : $config{chown}) ) {
             my($uid, $gid) = split(':', $chown);
+            $uid = '' unless defined $uid;
             $uid = ($uid !~ /^\d+$/
                     ? ($uid eq '' ? -1 : (defined getpwnam($uid) ? getpwnam($uid) : -1) )
                     : $uid );
+            $gid = '' unless defined $gid;
             $gid = ($gid !~ /^\d+$/
                     ? ($gid eq '' ? -1 : (defined getgrnam($gid) ? getgrnam($gid) : -1) )
                     : $gid );
@@ -2569,8 +2571,8 @@ operating system.
 =head2 Testing configurations
 
 When you are testing new configuration directives, use the B<dry-run>
-option and watch the log output (see the B<loglevel> and B<logfile>
-directives). This will help you avoid losing data unnecessarily.
+option and watch the log output using the B<loglevel> and B<logfile>
+directives. This will help you avoid losing data unnecessarily.
 
 You may also specify the B<settings> option which will show you all
 the current settings after defaults, configuration file, and
@@ -2620,11 +2622,11 @@ Example:
 
 =item B<dry-run>
 
-Shows you what will happen if you were to run B<savelogs> with the
-current settings without actually doing it. This is a useful option
-to specify if you want to see what effect some changes might have, or
-to see which files are going to get archived with the current
-settings.
+When used with the B<logfile> and B<loglevel> settings, B<dry-run>
+will show you what will happen if you were to run B<savelogs> with the
+current settings without actually doing it. This is a useful option to
+specify if you want to see what effect some changes might have, or to
+see which files are going to get archived with the current settings.
 
 Note that B<savelogs> running under the B<dry-run> directive will
 sometimes produce errors that wouldn't occur during normal use. This
@@ -2632,11 +2634,11 @@ can happen for a variety of reasons, mostly related to B<savelogs>
 looking for files that don't yet exist, or archives that don't yet
 exist because they weren't actually created. In this respect,
 B<dry-run> doesn't give you precisely what will happen, but it does
-give you a good idea.
+give you a good idea. Use it with a grain of salt.
 
 Example:
 
-    savelogs --dry-run /var/log/foo
+    savelogs --dry-run --loglevel=2 /var/log/foo
 
 =item B<home>
 

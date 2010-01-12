@@ -1,6 +1,6 @@
 use Test;
 use POSIX qw(strftime);
-BEGIN { $| = 1; plan(tests => 71); chdir 't' if -d 't'; }
+BEGIN { $| = 1; plan(tests => 74); chdir 't' if -d 't'; }
 require 'savelogs.pl';
 
 use vars qw(
@@ -250,10 +250,17 @@ unlink "$log1.$date_ext";
 $log1 = make_log(1024, 'a');
 $log2 = make_log(1024, 'b');
 $log3 = make_log(1024, 'c');
-$return = `$savelogs --home=. --process=move --postmovehook='tr "x" "y" < \$LOG > \$LOGz' --log=$log1 --log=$log2 --log=$log3`;
+$return = `$savelogs --home=. --process=move --postmovehook='touch barf; sleep 2; touch biff; tr "x" "y" < \$LOG > \$LOGz' --log=$log1 --log=$log2 --log=$log3`;
 unlink "$log1.${date_ext}";
 unlink "$log2.${date_ext}";
 unlink "$log3.${date_ext}";
+
+ok( -f 'barf' );
+ok( -f 'biff' );
+my $mtdiff = (stat('biff'))[9] - (stat('barf'))[9];
+ok( $mtdiff >= 2 );
+unlink 'barf';
+unlink 'biff';
 
 ok( -f "$log1.${date_ext}z" );
 $return = `grep y $log1.${date_ext}z`;
