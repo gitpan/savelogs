@@ -309,6 +309,7 @@ $log1 = make_log(1024, 'www/logs/error_log-domain.name3');
 
 ## run
 system( "$savelogs --home=. --config=/conf/savelogs-3a.conf" );
+select undef, undef, undef, 0.5;
 
 ## check
 ok( -f "usr/local/etc/httpd/logs/access_log-domain.name1.$date_ext.gz" );

@@ -15,8 +15,8 @@ use vars qw($VERSION $BUILD);
 
 my $prognam = $0;
 $prognam    =~ s!^.*/([^/]+)$!$1!;
-$VERSION    = '1.94';
-$BUILD      = sprintf("%d/%02d/%02d", q$Id: savelogs,v 1.7 2010/01/12 17:21:48 scott Exp $ =~
+$VERSION    = '1.95';
+$BUILD      = sprintf("%d/%02d/%02d", q$Id: savelogs,v 1.8 2011/08/19 15:28:16 scott Exp $ =~
 		      m!(\d{1,4})/(\d{1,2})/(\d{1,2})!);
 
 ## logging levels; debugging levels are for displaying data values
@@ -1806,7 +1806,7 @@ APACHE_CONF: {
 		    ## get server root
 		    local $_;
 		    while( <$HTTPD> ) {
-			next unless /^ServerRoot\s+"?([^"]+)"?\s*$/i;
+			next unless /^\s*ServerRoot\s+"?([^"]+)"?\s*$/i;
 			$server_root = $1;
 			clean_path($server_root);
 			$server_root .= '/' if $server_root && $server_root !~ m!/$!;
@@ -1833,7 +1833,7 @@ APACHE_CONF: {
             local $_;
 	  LINE: while( <$HTTPD> ) {
 		## skip comments
-		next LINE if /^\#/;            ## escape needed for emacs happiness
+		next LINE if /^\s*#/;
 
 		## process include directives, if desired
 		if( $config{'apacheinclude'} && /^\s*Include\s+(.+?)\s*$/i ) {

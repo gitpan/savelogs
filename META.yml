@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                savelogs
-version:             1.94
+version:             1.95
 abstract:            save/rotate/delete log files nicely
 license:             ~
 author:              

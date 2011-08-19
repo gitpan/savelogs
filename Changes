@@ -1,6 +1,14 @@
 ChangeLog for savelogs
 =============================================================================
 
+*Release 1.95*
+----------------------------
+revision 1.8
+date: 2011/08/19 15:28:16;  author: scott;  state: Exp;  lines: +4 -4
+- allow ServerRoot to have leading spaces (no other directives affected)
+----------------------------
+
+
 *Release 1.94*
 ----------------------------
 revision 1.7
