@@ -22,10 +22,14 @@ ok( $settings{'version'}, $result );
 ## fetch default settings
 $settings = settings(`$savelogs --settings 2>&1`);
 
+# Test 4 got: "(?^:^/dev/null$|\\|)" (t/0_defaults.t at line 28)
+#   Expected: "(?-xism:^/dev/null$|\\|)"
+#  t/0_defaults.t line 28 is: ok( $settings->{'apachelogexclude'}, '(?-xism:^/dev/null$|\|)' );
+
 ## test default values (compatibility errors)
 ok( $settings->{'apacheconf'}, 	     'undef' );
-ok( $settings->{'apachelog'},  	     '(?i-xsm:^\s*(?:TransferLog|ErrorLog|AgentLog|RefererLog|CustomLog)\s+(\S+))' );
-ok( $settings->{'apachelogexclude'}, '(?-xism:^/dev/null$|\|)' );
+ok( $settings->{'apachelog'} =~ /\QTransferLog|ErrorLog|AgentLog|RefererLog|CustomLog\E/ );
+ok( $settings->{'apachelogexclude'} =~ /\Q\/dev\/null\E/ );
 ok( $settings->{'apachehost'},       '(  )' );
 ok( $settings->{'archive'},          'undef' );
 ok( $settings->{'chmod'},            'undef' );

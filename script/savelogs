@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl -w
 use strict;
 
 ## Scott Wiersdorf
@@ -15,8 +15,8 @@ use vars qw($VERSION $BUILD);
 
 my $prognam = $0;
 $prognam    =~ s!^.*/([^/]+)$!$1!;
-$VERSION    = '1.95';
-$BUILD      = sprintf("%d/%02d/%02d", q$Id: savelogs,v 1.8 2011/08/19 15:28:16 scott Exp $ =~
+$VERSION    = '1.96';
+$BUILD      = sprintf("%d/%02d/%02d", q$Id: savelogs,v 1.9 2011/08/22 19:37:35 scott Exp $ =~
 		      m!(\d{1,4})/(\d{1,2})/(\d{1,2})!);
 
 ## logging levels; debugging levels are for displaying data values
@@ -679,7 +679,7 @@ MOVE:
 
 		## move the logs
 		unless( period_log( \%log_arg ) ) {
-		    undef $log;
+		    undef $log;  ## FIXME: this may not be right for all false return values of period_log()
 		    next;
 		}
 
@@ -775,6 +775,8 @@ CHOWN:
     write_log( LEVEL4, "Entering chown/chmod block" );
 
     for my $log ( @logs ) {
+        next unless $log;
+
         my $log_name = mkpath($log->{'newlogpath'}, $log->{'newlog'});
 
         if( my $chown = (exists $log->{chown} ? $log->{chown} : $config{chown}) ) {
@@ -1318,6 +1320,7 @@ COMPRESS:
 	    my $archive  = undef;
 
 	    next unless $log;
+            next unless scalar %$log;
 
 	    ## make sure we're home
 	    chdir( $config{'home'} )

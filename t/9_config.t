@@ -297,6 +297,7 @@ system( 'rm', '-r', 'var' );
 ## setup directories
 system( 'mkdir', '-p', 'usr/local/etc/httpd/logs' );
 system( 'mkdir', '-p', 'usr/local/etc/httpd/conf' );
+system( 'rm', '-r', 'www' ) if -e 'www';
 symlink( 'usr/local/etc/httpd', 'www' );
 system( 'cp', '-p', 'conf/httpd.conf', 'www/conf' );
 
@@ -309,7 +310,6 @@ $log1 = make_log(1024, 'www/logs/error_log-domain.name3');
 
 ## run
 system( "$savelogs --home=. --config=/conf/savelogs-3a.conf" );
-select undef, undef, undef, 0.5;
 
 ## check
 ok( -f "usr/local/etc/httpd/logs/access_log-domain.name1.$date_ext.gz" );
@@ -325,6 +325,8 @@ ok( -s _ < 1024 && -s _ > 0 );
 
 ## clean
 system( 'rm', '-r', 'usr', 'www' );
+
+#exit;
 
 #######################################
 ## TEST 3b: using ApacheConf with NoLog

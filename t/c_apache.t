@@ -28,5 +28,5 @@ ok( ! -f "www/logs/error_loggy" );
 END {
     unlink "httpd_c.conf";
     unlink "foo.log";
-    unlink "www/logs/error_loggy";
+    system( 'rm', '-r', 'www' );
 }

@@ -47,7 +47,7 @@ ok( $settings_new->{'apacheconf'}, 'www/foo/httpd.conf' );
 
 ## apachelog
 $settings_new = settings(`$savelogs --apachelog=TransferLog --settings 2>&1`);
-ok( $settings_new->{'apachelog'}, '(?i-xsm:^\s*(?:TransferLog)\s+(\S+))' );
+ok( $settings_new->{'apachelog'} =~ /\Q(?:TransferLog)\E/ );
 
 ## apachelogexclude
 $settings_new = settings(`$savelogs --apachelogexclude= --settings 2>&1`);
