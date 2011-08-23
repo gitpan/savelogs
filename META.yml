@@ -1,21 +1,13 @@
 --- #YAML:1.0
-name:               savelogs
-version:            1.96
-abstract:           save/rotate/delete log files nicely
-author:
+name:                savelogs
+version:             1.97
+abstract:            save/rotate/delete log files nicely
+license:             ~
+author:              
     - Scott Wiersdorf <scott@perlcode.org>
-license:            unknown
-distribution_type:  module
-configure_requires:
-    ExtUtils::MakeMaker:  0
-build_requires:
-    ExtUtils::MakeMaker:  0
-requires:  {}
-no_index:
-    directory:
-        - t
-        - inc
-generated_by:       ExtUtils::MakeMaker version 6.57_05
+generated_by:        ExtUtils::MakeMaker version 6.42
+distribution_type:   module
+requires:     
 meta-spec:
-    url:      http://module-build.sourceforge.net/META-spec-v1.4.html
-    version:  1.4
+    url:     http://module-build.sourceforge.net/META-spec-v1.3.html
+    version: 1.3
