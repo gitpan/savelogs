@@ -15,8 +15,8 @@ use vars qw($VERSION $BUILD);
 
 my $prognam = $0;
 $prognam    =~ s!^.*/([^/]+)$!$1!;
-$VERSION    = '1.97';
-$BUILD      = sprintf("%d/%02d/%02d", q$Id: savelogs,v 1.10 2011/08/23 13:31:56 scott Exp $ =~
+$VERSION    = '1.98';
+$BUILD      = sprintf("%d/%02d/%02d", q$Id: savelogs,v 1.11 2011/10/15 17:24:56 scott Exp $ =~
 		      m!(\d{1,4})/(\d{1,2})/(\d{1,2})!);
 
 ## logging levels; debugging levels are for displaying data values
@@ -1751,7 +1751,7 @@ APACHE_CONF: {
 		}
 
 		## this will expand any wildcards
-		my @glob_conf = grep { s!^$config{'home'}!! } glob $config{'home'} . $httpd_conf;
+		my @glob_conf = map { s!^$config{'home'}!!; $_ } map { abs_path($_) } glob $config{'home'} . $httpd_conf;
 		if( scalar @glob_conf > 1 ) {
 		    debug( LEVEL1, "Found " . scalar @glob_conf . " config files from glob '$httpd_conf'" );
                     for my $glob ( @glob_conf ) {
@@ -1843,14 +1843,19 @@ APACHE_CONF: {
 		    my $include = $1;
 
 		    ## relative paths need fixup
-		    unless( m!^/! =~ $include ) {
+		    unless( $include =~ m!^/! ) {
 			debug( LEVEL1, "Appending '$server_root' to include file $include" );
 			$include = $server_root . $include;
 		    }
 
-		    debug( LEVEL1, "Recursively searching '$include' now..." );
-                    my ($host_logs, @new_logs) = fetch_apache_logs($include, (keys %hosts ? keys %hosts : ()));
-                    push @logs, @new_logs;
+                    ## here we have a full include path, which may be a glob
+                    my @glob_conf = map { s!^$config{'home'}!!; $_ } map { abs_path($_) } glob $config{'home'} . $include;
+                    debug( LEVEL1, "Home set to $config{'home'}..." );
+                    for my $glob ( @glob_conf ) {
+                        debug( LEVEL1, "Recursively searching '$glob' now..." );
+                        my ($host_logs, @new_logs) = fetch_apache_logs($glob, (keys %hosts ? keys %hosts : ()));
+                        push @logs, @new_logs;
+                    }
 		    next LINE;
 		}
 

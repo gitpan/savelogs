@@ -151,8 +151,8 @@ ok( -f 'www/logs/error_koggy' );
 $out = `$savelogs --debug=5 --loglevel=5 --logfile=stdout --home=. --process=delete --apacheconf=httpd_a.conf --apacheinclude 2>&1`;
 ok( $out =~ /Skipping 'httpd_d\.conf'/ );  ## make sure non-existent file is found and warned
 
-## test symlinks to conf files
-ok( $out =~ /Skipping 'link_a\.conf': already processed/ );
+## test symlinks to conf files; this is link_a.conf expanded
+ok( $out =~ /Skipping 'httpd_a\.conf': already processed/ );
 
 ok( ! -e 'foo.log' );
 ok( ! -e 'www/logs/error_loggy' );

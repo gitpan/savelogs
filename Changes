@@ -1,6 +1,15 @@
 ChangeLog for savelogs
 =============================================================================
 
+*Release 1.98*
+----------------------------
+revision 1.11
+date: 2011/10/15 17:24:56;  author: scott;  state: Exp;  lines: +12 -7
+- fix for full paths in Include directives
+- fix for Include globbing
+----------------------------
+
+
 *Release 1.97*
 ----------------------------
 revision 1.10

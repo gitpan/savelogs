@@ -20,6 +20,7 @@ t/9_config.t
 t/a_apache.t
 t/b_apache.t
 t/c_apache.t
+t/d_apache.t
 t/conf/httpd.conf
 t/conf/savelogs-1a.conf
 t/conf/savelogs-1b.conf
